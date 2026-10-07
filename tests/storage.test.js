@@ -188,3 +188,15 @@ test('старое имя экрана настроек переходит в п
   backend.setItem('panic-mode:session', JSON.stringify({ screen: 'settings' }));
   assert.equal(createStorage(backend).loadSession().screen, 'profile');
 });
+
+test('серия хранится отдельно у гостя и аккаунта, мусор отбрасывается', () => {
+  const backend = memoryBackend();
+  const guest = createStorage(backend);
+  const anna = createStorage(backend, { prefix: userPrefix('anna') });
+  guest.saveStreak({ activity: { '2026-10-07': ['p1'] }, doneDays: ['2026-10-07'] });
+  assert.deepEqual(guest.loadStreak(), { activity: { '2026-10-07': ['p1'] }, doneDays: ['2026-10-07'] });
+  assert.deepEqual(anna.loadStreak(), { activity: {}, doneDays: [] });
+
+  backend.setItem('panic-mode:streak', JSON.stringify({ activity: { 'вчера': ['x'], '2026-10-06': ['ok', 5] }, doneDays: ['2026-10-06', 'завтра', 7] }));
+  assert.deepEqual(guest.loadStreak(), { activity: { '2026-10-06': ['ok'] }, doneDays: ['2026-10-06'] });
+});

@@ -16,12 +16,13 @@ function keysFor(prefix) {
     session: `${prefix}session`,
     scenarios: `${prefix}scenarios`,
     outbox: `${prefix}outbox`, // изменения, которые ещё не дошли до сервера
+    streak: `${prefix}streak`, // журнал активности и засчитанные дни
     legacyCurrent: prefix === PREFIX ? `${PREFIX}current` : null, // текущий план из первой версии
   };
 }
 
 export const MAX_SCENARIOS = 50;
-export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile'];
+export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile', 'streak'];
 const RENAMED_SCREENS = { settings: 'profile' }; // экраны, переименованные в новых версиях
 
 export const DEFAULT_SETTINGS = { theme: 'system', fs: 'm', reduce: null };
@@ -157,6 +158,24 @@ export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = 
 
     saveOutbox(outbox) {
       return write(KEYS.outbox, Object.keys(outbox).length ? outbox : null);
+    },
+
+    /** Серия: { activity: { day: [planId] }, doneDays: [day] } */
+    loadStreak() {
+      const raw = read(KEYS.streak, null);
+      const day = /^\d{4}-\d{2}-\d{2}$/;
+      const activity = {};
+      if (raw?.activity && typeof raw.activity === 'object') {
+        for (const [d, ids] of Object.entries(raw.activity)) {
+          if (day.test(d) && Array.isArray(ids)) activity[d] = ids.filter((id) => typeof id === 'string');
+        }
+      }
+      const doneDays = Array.isArray(raw?.doneDays) ? raw.doneDays.filter((d) => typeof d === 'string' && day.test(d)) : [];
+      return { activity, doneDays };
+    },
+
+    saveStreak(streak) {
+      return write(KEYS.streak, streak);
     },
 
     /** Полная замена списка сценариев данными с сервера. */

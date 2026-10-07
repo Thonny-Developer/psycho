@@ -2,6 +2,8 @@ import { h, icon, replaceKeepFocus } from '../ui.js';
 import { IC } from '../icons.js';
 import { avatar } from '../avatars.js';
 import { plural } from '../plan.js';
+import { daysWord } from '../streak.js';
+import { badgeList } from './streak.js';
 
 const THEMES = [['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Как в системе']];
 const SIZES = [['m', 'Обычный', '16px'], ['l', 'Крупный', '19px'], ['xl', 'Самый крупный', '22px']];
@@ -39,7 +41,8 @@ function radioGroup({ id, options, value, onPick, aa = false }) {
 function hero(state, actions) {
   const { account } = state;
   const profile = account.profile;
-  const name = account.user ? profile?.display_name || account.user.email : 'Без аккаунта';
+  // Без имени показываем часть почты до @: целиком адрес на узком экране рвётся по буквам
+  const name = account.user ? profile?.display_name || account.user.email.split('@')[0] : 'Без аккаунта';
   const since = account.user ? profile?.created_at : state.firstSeenAt;
   return h('div', { class: 'profile-hero' },
     avatar(account.user ? profile?.avatar : 'stone', 72),
@@ -55,10 +58,15 @@ function stat(value, label) {
   return h('div', { class: 'stat' }, h('span', { class: 'stat__value' }, String(value)), h('span', { class: 'stat__label' }, label));
 }
 
-function statsGrid(stats) {
-  return h('div', { class: 'stats-grid', role: 'list', 'aria-label': 'Статистика' },
-    h('div', { role: 'listitem' }, stat(stats.completedPlans, `${plural(stats.completedPlans, ['план завершён', 'плана завершено', 'планов завершено'])}`)),
-    h('div', { role: 'listitem' }, stat(stats.doneSteps, `${plural(stats.doneSteps, ['шаг сделан', 'шага сделано', 'шагов сделано'])}`)));
+function statsGrid(stats, streak, actions) {
+  return h('div', { class: 'stack', style: { gap: '10px' } },
+    h('div', { class: 'stats-grid', role: 'list', 'aria-label': 'Статистика' },
+      h('div', { role: 'listitem' }, stat(stats.completedPlans, `${plural(stats.completedPlans, ['план завершён', 'плана завершено', 'планов завершено'])}`)),
+      h('div', { role: 'listitem' }, stat(stats.doneSteps, `${plural(stats.doneSteps, ['шаг сделан', 'шага сделано', 'шагов сделано'])}`)),
+      h('div', { role: 'listitem' }, stat(streak.current, `${daysWord(streak.current)} подряд сейчас`)),
+      h('div', { role: 'listitem' }, stat(streak.best, `${daysWord(streak.best)} — лучшая серия`))),
+    badgeList(streak.best),
+    h('button', { class: 'link', type: 'button', style: { alignSelf: 'flex-start' }, dataset: { focus: 'open-streak' }, onClick: actions.openStreak }, 'Календарь и график серии'));
 }
 
 function accountCard(state, actions) {
@@ -160,7 +168,7 @@ export function createProfile({ actions }) {
 
       replaceKeepFocus(body, [
         hero(state, actions),
-        statsGrid(state.stats),
+        statsGrid(state.stats, state.streak, actions),
         accountCard(state, actions),
         h('div', { class: 'card', style: { gap: '20px', padding: '20px' } },
           h('div', { class: 'setting' },

@@ -2,6 +2,7 @@ import { h, icon, replaceKeepFocus } from '../ui.js';
 import { IC } from '../icons.js';
 import { TYPES, OWN_TOPIC, greetingByHour } from '../content.js';
 import { getProgress } from '../plan.js';
+import { streakWidget } from './streak.js';
 
 export function miniPlan(scenario, onOpen) {
   const p = getProgress(scenario);
@@ -14,6 +15,7 @@ export function miniPlan(scenario, onOpen) {
 
 export function createHome({ actions }) {
   const saved = h('div', { class: 'stack', style: { gap: '10px' } });
+  const widget = h('div', {});
 
   const el = h('section', { class: 'screen' },
     h('div', { class: 'scroll' },
@@ -21,6 +23,7 @@ export function createHome({ actions }) {
         h('div', { class: 'stack', style: { gap: '6px', padding: '0 4px' } },
           h('span', { class: 'text-15 muted' }, greetingByHour(new Date().getHours())),
           h('h1', { class: 'h-title', tabindex: '-1' }, 'Я рядом. С чего начнём?')),
+        widget,
         h('button', { class: 'panic-btn', type: 'button', onClick: () => actions.startCalm(null) },
           h('span', { class: 'panic-btn__ring', 'aria-hidden': 'true' }),
           h('span', { class: 'panic-btn__icon', 'aria-hidden': 'true' }, icon(IC.wind, 28, { strokeWidth: 1.7 })),
@@ -30,7 +33,7 @@ export function createHome({ actions }) {
         h('div', { class: 'stack', style: { gap: '14px' } },
           h('h2', { class: 'h-section', style: { padding: '0 4px' } }, 'Или расскажи, что случилось'),
           h('div', { class: 'type-grid' },
-            TYPES.map((t) => h('button', { class: 'type-card', type: 'button', onClick: () => actions.startCalm(t.key) },
+            TYPES.map((t) => h('button', { class: 'type-card', type: 'button', onClick: () => actions.startChat(t.key) },
               h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(t.icon, 21)),
               h('span', {},
                 h('span', { class: 'type-card__label' }, t.label),
@@ -49,6 +52,7 @@ export function createHome({ actions }) {
   return {
     el,
     update(state) {
+      replaceKeepFocus(widget, streakWidget(state.streak, actions));
       replaceKeepFocus(saved, state.scenarios.length
         ? state.scenarios.slice(0, 2).map((s) => miniPlan(s, () => actions.openScenario(s.id)))
         : h('p', { class: 'empty-dashed' }, 'Пока пусто. Сохрани план — он появится здесь.'));

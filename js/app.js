@@ -51,6 +51,8 @@ import {
   createDeleteAccountSheet,
 } from './screens/overlays.js';
 import { computeStats, uniquePlans, buildExport, exportFileName } from './stats.js';
+import { dayKey, recordActivity, withCompletion, evaluateDay, syncToday, computeStreak, weekView } from './streak.js';
+import { createStreakScreen } from './screens/streak.js';
 
 // У гостя и у каждого аккаунта своё пространство в localStorage, чтобы данные не смешивались.
 // Сохранённая сессия Supabase читается сразу, чтобы после перезагрузки не мелькали данные гостя.
@@ -117,6 +119,10 @@ function baseState() {
     exporting: false,
     profileEdit: { busy: false, errors: {} },
     deleteAccount: null, // { busy, error }
+    streakLocal: { activity: {}, doneDays: [] }, // журнал активности и дни, посчитанные на устройстве
+    serverDays: [], // засчитанные дни аккаунта с сервера
+    streakMonth: null, // месяц календаря на экране серии, 'YYYY-MM'
+    streakReturn: 'home',
   };
 }
 
@@ -127,6 +133,7 @@ function initialState() {
   Object.assign(state, prefs, { scenarios: storage.listScenarios() });
   if (restoredUser) state.account = { ...state.account, user: restoredUser };
   state.firstSeenAt ??= Date.now();
+  state.streakLocal = storage.loadStreak();
 
   if (session) {
     Object.assign(state, session);
@@ -166,7 +173,7 @@ function persist() {
     reminderTime: state.reminderTime,
     firstSeenAt: state.firstSeenAt,
   });
-  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done'];
+  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done', 'streak'];
   storage.saveSession({
     screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
     type: state.type,
@@ -263,6 +270,7 @@ const actions = {
 
   goBack() {
     if (state.screen === 'profile-edit') return setState({ screen: 'profile' });
+    if (state.screen === 'streak') return setState({ screen: state.streakReturn ?? 'home' });
     if (state.screen === 'plan') {
       return setState({ screen: state.planFrom === 'saved' ? 'saved' : state.messages.length ? 'chat' : 'home' });
     }
@@ -282,7 +290,7 @@ const actions = {
     split: {},
   }),
 
-  /** «Своя ситуация»: сразу в чат, без дыхания — человек пришёл рассказать сам. */
+  /** Тема или «Своя ситуация»: сразу в чат. Дыхание только по кнопке «Мне плохо прямо сейчас». */
   startChat: (type) => setState({
     type,
     screen: 'chat',
@@ -359,7 +367,7 @@ const actions = {
     }
     // Пока ждали, человек мог начать новый разговор
     if (state.conversation !== conversation) return;
-    setState({ plan, planStatus: 'ready', newIds: new Set() });
+    setState({ ...trackPlan(plan), planStatus: 'ready', newIds: new Set() });
     announce(`План готов: ${plan.title}`);
   },
 
@@ -372,7 +380,7 @@ const actions = {
       source: 'fallback',
       fallbackReason: state.online ? 'Связаться с AI не получилось.' : 'Сейчас нет сети.',
     });
-    setState({ screen: 'plan', planFrom: 'chat', ai: 'idle', planStatus: 'ready', plan, split: {} });
+    setState({ screen: 'plan', planFrom: 'chat', ai: 'idle', planStatus: 'ready', ...trackPlan(plan), split: {} });
   },
 
   /** Повтор для офлайн-плана: при неудаче текущий план с отметками остаётся. */
@@ -385,7 +393,8 @@ const actions = {
       if (state.plan?.id !== old.id) return setState({ planRetrying: false });
       // id сохраняем: если план уже в сценариях, он там и обновится
       const fresh = { ...createPlan({ type: old.type, title: result.title, steps: result.steps, source: 'api' }), id: old.id };
-      setState({ planRetrying: false, split: {}, ...commitPlan(fresh) });
+      const tracked = trackPlan(fresh);
+      setState({ planRetrying: false, split: {}, ...commitPlan(tracked.plan), streakLocal: tracked.streakLocal });
       announce(`План готов: ${fresh.title}`);
     } catch (error) {
       if (state.plan?.id !== old.id) return setState({ planRetrying: false });
@@ -397,17 +406,20 @@ const actions = {
 
   toggleStep(stepId, done) {
     const before = getProgress(state.plan);
-    const plan = setStepDone(state.plan, stepId, done);
-    setState(commitPlan(plan));
-    afterToggle(before, plan);
+    const tracked = trackPlan(setStepDone(state.plan, stepId, done));
+    setState({ ...commitPlan(tracked.plan), streakLocal: tracked.streakLocal });
+    afterToggle(before, tracked.plan);
   },
 
   toggleSubstep(stepId, substepId, done) {
     const before = getProgress(state.plan);
-    const plan = setSubstepDone(state.plan, stepId, substepId, done);
-    setState(commitPlan(plan));
-    afterToggle(before, plan);
+    const tracked = trackPlan(setSubstepDone(state.plan, stepId, substepId, done));
+    setState({ ...commitPlan(tracked.plan), streakLocal: tracked.streakLocal });
+    afterToggle(before, tracked.plan);
   },
+
+  openStreak: () => setState({ screen: 'streak', streakReturn: state.screen === 'streak' ? state.streakReturn : state.screen, streakMonth: null }),
+  setStreakMonth: (month) => setState({ streakMonth: month }, { focusKey: undefined }),
 
   async splitStep(stepId) {
     const plan = state.plan;
@@ -685,7 +697,7 @@ async function reply() {
     setState({
       ai: 'idle',
       messages: [...state.messages, ...added],
-      plan,
+      ...trackPlan(plan),
       planStatus: 'ready',
       planFrom: 'chat',
       split: {},
@@ -727,6 +739,8 @@ function dataFromStorage() {
   const session = storage.loadSession();
   return {
     scenarios: storage.listScenarios(),
+    streakLocal: storage.loadStreak(),
+    serverDays: [],
     messages: session?.messages ?? [],
     type: session?.type ?? null,
     plan: session?.plan ?? null,
@@ -779,7 +793,8 @@ async function refreshFromServer() {
   const pulled = await sync?.pull();
   if (!pulled) return;
   storage.replaceScenarios(pulled.scenarios);
-  setState({ scenarios: storage.listScenarios(), serverPlans: pulled.all });
+  const serverDays = await sync?.pullStreak();
+  setState({ scenarios: storage.listScenarios(), serverPlans: pulled.all, ...(serverDays ? { serverDays } : {}) });
 }
 
 async function loadProfile(userId) {
@@ -877,6 +892,7 @@ const SCREENS = {
   saved: createSaved,
   profile: createProfile,
   'profile-edit': createProfileEdit,
+  streak: createStreakScreen,
   auth: createAuth,
 };
 
@@ -920,7 +936,7 @@ function renderHeader() {
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
         h('span', { class: 'logo__word' }, 'Паника-режим'))
       : null,
-    ['chat', 'plan', 'profile-edit'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['chat', 'plan', 'profile-edit', 'streak'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
     s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
     h('div', { class: 'header__spacer' }),
@@ -949,13 +965,61 @@ function renderBanner() {
   }
 }
 
+// ---------- Серия ----------
+
+function userTimezone() {
+  return (state.account.user && state.account.profile?.timezone) || currentTimezone();
+}
+
+/**
+ * С планом поработали: отмечаем активность сегодня и пересчитываем только сегодняшний день.
+ * Возвращает кусок состояния для setState.
+ */
+function trackPlan(plan) {
+  const tracked = withCompletion(plan);
+  const tz = userTimezone();
+  const today = dayKey(Date.now(), tz);
+  const activity = recordActivity(state.streakLocal.activity, tracked.id, today);
+  const plans = new Map(uniquePlans([tracked], state.scenarios, state.serverPlans).map((p) => [p.id, p]));
+  const { status } = evaluateDay({ day: today, activity, plans, timeZone: tz });
+  const streakLocal = { activity, doneDays: syncToday(state.streakLocal.doneDays, today, status) };
+  storage.saveStreak(streakLocal);
+  return { plan: tracked, streakLocal };
+}
+
+/**
+ * Что показать в виджете и на экране серии. У аккаунта прошлые дни — с сервера
+ * (их пишет только триггер), сегодняшний считается здесь, чтобы отклик был сразу.
+ */
+function streakView(plans) {
+  const tz = userTimezone();
+  const today = dayKey(Date.now(), tz);
+  const signedIn = Boolean(state.account.user);
+  const local = state.streakLocal.doneDays;
+  const doneDays = signedIn
+    ? [...new Set([...state.serverDays.filter((d) => d !== today), ...local.filter((d) => d === today)])].sort()
+    : local;
+  const streak = computeStreak(doneDays, today);
+  const map = new Map(plans.map((p) => [p.id, p]));
+  const todayInfo = evaluateDay({ day: today, activity: state.streakLocal.activity, plans: map, timeZone: tz });
+  return {
+    ...streak,
+    today,
+    doneDays,
+    remainingSteps: todayInfo.remainingSteps,
+    week: weekView(doneDays, today, streak.restDays),
+    guest: !signedIn && state.account.enabled === true,
+  };
+}
+
 /** Состояние плюс вычисляемые поля для экранов. */
 function derived() {
-  const plans = uniquePlans(state.serverPlans, state.scenarios, state.plan ? [state.plan] : []);
+  const plans = uniquePlans(state.plan ? [state.plan] : [], state.scenarios, state.serverPlans);
   return {
     ...state,
     reduced: isReduced(),
     stats: computeStats(plans),
+    streak: streakView(plans),
     reminderTime: state.account.user ? state.account.profile?.reminder_time?.slice(0, 5) ?? null : state.reminderTime,
   };
 }

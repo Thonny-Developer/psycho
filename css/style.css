@@ -2664,3 +2664,317 @@ textarea::placeholder {
   height: auto;
   max-width: 64px;
 }
+
+/* ===== Серия ===== */
+
+.streak-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  text-align: left;
+  transition: border-color .3s;
+}
+
+.streak-widget:hover {
+  border-color: var(--accent);
+}
+
+.streak-widget__top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.streak-widget__title {
+  font-size: calc(17px * var(--fs));
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.streak-sun {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  color: var(--warn);
+  display: grid;
+  place-items: center;
+}
+
+.streak-sun--big {
+  width: 64px;
+  height: 64px;
+}
+
+.streak-local {
+  font-size: calc(13px * var(--fs));
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.week-dots {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.week-dot__mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--on-accent);
+}
+
+.week-dot--done .week-dot__mark {
+  background: var(--accent);
+}
+
+.week-dot--rest .week-dot__mark {
+  background: transparent;
+  border: 2px dashed var(--accent-mute);
+}
+
+.week-dot--today .week-dot__mark {
+  background: transparent;
+  border: 2px solid var(--accent);
+}
+
+.week-dot--future .week-dot__mark {
+  background: transparent;
+  border: 1.5px solid var(--line);
+}
+
+.week-dot__label {
+  font-size: calc(12px * var(--fs));
+  color: var(--text-2);
+}
+
+.week-dot--today .week-dot__label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.streak-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  text-align: center;
+}
+
+.streak-hero__number {
+  font-family: var(--serif);
+  font-size: calc(64px * var(--fs));
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.streak-hero__title {
+  font-family: var(--serif);
+  font-size: calc(24px * var(--fs));
+  font-weight: 500;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px 0 10px;
+  border-radius: 999px;
+  border: 1.5px dashed var(--line);
+  color: var(--text-2);
+  font-size: calc(14px * var(--fs));
+}
+
+.badge--earned {
+  border-style: solid;
+  border-color: transparent;
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.badge__icon {
+  display: grid;
+  place-items: center;
+}
+
+.badge--earned .badge__icon {
+  color: var(--warn);
+}
+
+.month {
+  padding: 16px;
+  gap: 10px;
+}
+
+.month__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.month__title {
+  font-size: calc(17px * var(--fs));
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.month__grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.month__grid th {
+  padding: 4px 0;
+  font-size: calc(12px * var(--fs));
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.month__grid td {
+  padding: 3px 0;
+  text-align: center;
+}
+
+.month__day {
+  display: inline-grid;
+  place-items: center;
+  width: min(36px, 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  font-size: calc(14px * var(--fs));
+  font-variant-numeric: tabular-nums;
+}
+
+.month__day--done {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.month__day--rest {
+  border: 2px dashed var(--accent-mute);
+}
+
+.month__day--today {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.month__day--done.month__day--today {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.month__day--future {
+  color: var(--text-2);
+  opacity: .6;
+}
+
+.month__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.month__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.legend--done {
+  background: var(--accent);
+}
+
+.legend--rest {
+  border: 2px dashed var(--accent-mute);
+}
+
+.chart {
+  padding: 18px;
+  gap: 14px;
+}
+
+.chart__bars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  height: 160px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chart__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+}
+
+.chart__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart__track {
+  flex: 1;
+  width: 100%;
+  max-width: 44px;
+  display: flex;
+  align-items: flex-end;
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.chart__bar {
+  width: 100%;
+  border-radius: 12px;
+  background: var(--accent);
+  transition: height .6s var(--ease);
+}
+
+.chart__label {
+  font-size: calc(12px * var(--fs));
+  color: var(--text-2);
+  white-space: nowrap;
+}

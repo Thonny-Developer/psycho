@@ -104,6 +104,18 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
       return { scenarios, all };
     },
 
+    /** Засчитанные дни серии с сервера (их пишет только триггер) или null без связи. */
+    async pullStreak() {
+      const client = await getClient();
+      if (!client) return null;
+      const { data, error } = await client.from('streak_days').select('day').order('day', { ascending: false }).limit(400);
+      if (error) {
+        if (isAuthError(error)) onExpired();
+        return null;
+      }
+      return data.map((r) => r.day);
+    },
+
     /** Перенос гостевых планов: существующие строки не трогаем, дублей нет. */
     async importPlans(items) {
       const client = await getClient();
