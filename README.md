@@ -79,9 +79,32 @@ npm test
 3. Задай в Vercel переменную `APP_URL` — публичный адрес приложения, например `https://kero-psycho-helper.vercel.app` (без слеша в конце). Если её нет, берётся домен продакшена Vercel. На этот адрес ведут ссылки из писем и возврат после входа через Google.
 4. Authentication → URL Configuration в Supabase: в **Site URL** тот же адрес, что в `APP_URL`, в **Redirect URLs** — `https://<твой домен>/**` и `http://localhost:3000/**` для `vercel dev`. Это обязательно: адрес из запроса Supabase принимает, только если он есть в Redirect URLs, а иначе подставляет Site URL. По умолчанию это `http://localhost:3000`, поэтому без этой настройки письма и ведут на localhost.
 5. Authentication → Providers → Email: включено. Подтверждение почты можно оставить: после регистрации приложение покажет экран «Проверь почту».
-6. Вход через Google: в Google Cloud Console создай OAuth Client (Web), в Authorized redirect URIs добавь `https://<project>.supabase.co/auth/v1/callback`. Client ID и Secret вставь в Supabase → Providers → Google.
+6. Вход через Google — см. раздел «Вход через Google» ниже.
 7. В Vercel → Settings → Environment Variables добавь `SUPABASE_URL` (Project Settings → Data API) и `SUPABASE_PUBLISHABLE_KEY` (Project Settings → API Keys, `sb_publishable_…`). Этот ключ публичный по замыслу: данные защищают политики RLS. Для удаления аккаунта нужен ещё `SUPABASE_SECRET_KEY` (`sb_secret_…`): он используется только в `api/account.js` и в браузер не попадает никогда. Старые имена `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY` с legacy-ключами (`eyJ…`) тоже работают.
 8. Проверить политики и триггеры: `psql "<строка подключения>" -v ON_ERROR_STOP=1 -f supabase/tests/<файл>.sql` для `rls_test.sql`, `streak_test.sql` и `content_test.sql`. Скрипты работают в транзакции и всё откатывают.
+
+### Вход через Google
+
+В коде всё готово (`signInWithGoogle` в `js/auth.js`), настраиваются только кабинеты. `<project-ref>` — идентификатор проекта Supabase из его адреса `https://<project-ref>.supabase.co`.
+
+1. [Google Cloud Console](https://console.cloud.google.com) → создай проект → **Google Auth Platform** (раньше — APIs & Services → OAuth consent screen):
+   - **Branding:** название «Kero Psycho Helper», почта поддержки, в Authorized domains — `<project-ref>.supabase.co` и свой домен, если он собственный;
+   - **Audience:** External. Пока статус Testing, войти могут только адреса из Test users; для всех — Publish app. Для почты и имени отдельная проверка Google не нужна;
+   - **Data access:** `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`.
+2. **Clients → Create client → Web application:**
+   - Authorized JavaScript origins: адрес из `APP_URL` и `http://localhost:3000`;
+   - Authorized redirect URIs: `https://<project-ref>.supabase.co/auth/v1/callback` — тот же адрес, что в поле Callback URL на странице провайдера Google в Supabase.
+3. Supabase → Authentication → Sign In / Providers → **Google**: включи, вставь Client ID и Client Secret. Secret живёт только в Supabase, в Vercel и `.env` его не добавляй.
+4. Проверь Site URL и Redirect URLs (шаг 4 выше): после Google Supabase вернёт человека на `APP_URL`.
+
+Имя для профиля берётся из аккаунта Google, часовой пояс подставляется при первом входе. Если раньше была регистрация по паролю на ту же подтверждённую почту, Supabase свяжет оба способа входа с одним аккаунтом.
+
+Эндпоинты из раздела Supabase **OAuth Server** (`/auth/v1/oauth/authorize`, `/token`, JWKS) для этого не нужны: они для случая, когда сторонние приложения входят через твой проект Supabase.
+
+Если не работает:
+- `redirect_uri_mismatch` — в Google указан не тот Callback URL;
+- «Доступ заблокирован» — приложение в режиме Testing, а аккаунта нет в Test users;
+- после входа уводит на localhost — адреса сайта нет в Redirect URLs в Supabase.
 
 ### Данные и доступ
 
