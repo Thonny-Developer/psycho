@@ -1251,7 +1251,14 @@ function render(options) {
 
 // ---------- Запуск ----------
 
-window.addEventListener('online', () => setState({ online: true }));
+window.addEventListener('online', () => {
+  setState({ online: true });
+  // Сеть вернулась — отправляем то, что накопилось в очереди
+  sync?.flush();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && navigator.onLine) sync?.flush();
+});
 window.addEventListener('offline', () => setState({ online: false }));
 darkQuery.addEventListener?.('change', () => render());
 motionQuery.addEventListener?.('change', () => render());
