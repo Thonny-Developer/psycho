@@ -68,6 +68,17 @@ export function skeleton(count, size = 'big') {
     Array.from({ length: count }, (_, i) => h('span', { style: size === 'small' ? { width: `${90 - i * 15}%` } : null })));
 }
 
+/** Скачивание JSON-файла без сервера: Blob и временная ссылка. */
+export function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: filename, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Объявление для скринридера через общий aria-live регион. */
 export function announce(text) {
   const region = document.getElementById('status');

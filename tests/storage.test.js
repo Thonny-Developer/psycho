@@ -27,14 +27,14 @@ const makePlan = (title = 'Курсовая') =>
 
 test('настройки и онбординг переживают перезагрузку, мусор заменяется значениями по умолчанию', () => {
   const backend = memoryBackend();
-  const empty = { onboarded: false, settings: DEFAULT_SETTINGS, accountPromptSeen: false, accountHintSeen: false };
+  const empty = { onboarded: false, settings: DEFAULT_SETTINGS, accountPromptSeen: false, accountHintSeen: false, reminderTime: null, firstSeenAt: null };
   assert.deepEqual(createStorage(backend).loadPrefs(), empty);
 
-  const prefs = { onboarded: true, settings: { theme: 'dark', fs: 'xl', reduce: true }, accountPromptSeen: true, accountHintSeen: false };
+  const prefs = { onboarded: true, settings: { theme: 'dark', fs: 'xl', reduce: true }, accountPromptSeen: true, accountHintSeen: false, reminderTime: '19:30', firstSeenAt: 1700000000000 };
   createStorage(backend).savePrefs(prefs);
   assert.deepEqual(createStorage(backend).loadPrefs(), prefs);
 
-  backend.setItem('panic-mode:prefs', JSON.stringify({ onboarded: 'да', settings: { theme: 'neon', fs: 9, reduce: 'нет' } }));
+  backend.setItem('panic-mode:prefs', JSON.stringify({ onboarded: 'да', settings: { theme: 'neon', fs: 9, reduce: 'нет' }, reminderTime: '25 часов', firstSeenAt: 'вчера' }));
   assert.deepEqual(createStorage(backend).loadPrefs(), empty);
 });
 
@@ -181,4 +181,10 @@ test('у аккаунта нет переноса старого текущег�
   delete old.title;
   backend.setItem('panic-mode:current', JSON.stringify(old));
   assert.equal(createStorage(backend, { prefix: userPrefix('anna') }).loadSession(), null);
+});
+
+test('старое имя экрана настроек переходит в профиль', () => {
+  const backend = memoryBackend();
+  backend.setItem('panic-mode:session', JSON.stringify({ screen: 'settings' }));
+  assert.equal(createStorage(backend).loadSession().screen, 'profile');
 });

@@ -63,6 +63,7 @@ const COPY = {
   signup: { title: 'Новый аккаунт', lead: 'Займёт минуту. Планы и серия будут храниться в аккаунте.' },
   forgot: { title: 'Восстановить пароль', lead: 'Пришлём ссылку, по которой можно задать новый пароль.' },
   reset: { title: 'Новый пароль', lead: 'Придумай пароль, которого нет на других сайтах.' },
+  change: { title: 'Сменить пароль', lead: 'Новый пароль заменит старый на всех устройствах. Придумай такой, которого нет на других сайтах.' },
 };
 
 export function createAuth({ state, actions }) {
@@ -151,7 +152,7 @@ export function createAuth({ state, actions }) {
       ];
     } else {
       fields.password = field({ name: 'password', label: 'Новый пароль', type: 'password', autocomplete: 'new-password', hint: `Минимум ${PASSWORD_MIN} символов` });
-      body = [lead, form('reset', [fields.password.el], 'Сохранить пароль')];
+      body = [lead, form(mode === 'change' ? 'change' : 'reset', [fields.password.el], 'Сохранить пароль')];
     }
   }
 

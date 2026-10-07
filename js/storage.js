@@ -21,7 +21,8 @@ function keysFor(prefix) {
 }
 
 export const MAX_SCENARIOS = 50;
-export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'settings'];
+export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile'];
+const RENAMED_SCREENS = { settings: 'profile' }; // экраны, переименованные в новых версиях
 
 export const DEFAULT_SETTINGS = { theme: 'system', fs: 'm', reduce: null };
 const THEMES = ['system', 'light', 'dark'];
@@ -112,11 +113,13 @@ export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = 
         settings: cleanSettings(raw?.settings),
         accountPromptSeen: raw?.accountPromptSeen === true,
         accountHintSeen: raw?.accountHintSeen === true,
+        reminderTime: /^\d{2}:\d{2}$/.test(raw?.reminderTime ?? '') ? raw.reminderTime : null,
+        firstSeenAt: Number.isFinite(raw?.firstSeenAt) ? raw.firstSeenAt : null,
       };
     },
 
-    savePrefs({ onboarded, settings, accountPromptSeen = false, accountHintSeen = false }) {
-      return write(PREFS_KEY, { onboarded, settings, accountPromptSeen, accountHintSeen });
+    savePrefs({ onboarded, settings, accountPromptSeen = false, accountHintSeen = false, reminderTime = null, firstSeenAt = null }) {
+      return write(PREFS_KEY, { onboarded, settings, accountPromptSeen, accountHintSeen, reminderTime, firstSeenAt });
     },
 
     /** Где человек остановился: экран, тема, разговор и текущий план. */
@@ -124,7 +127,7 @@ export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = 
       const raw = read(KEYS.session, null);
       if (raw && typeof raw === 'object') {
         return {
-          screen: SCREENS.includes(raw.screen) ? raw.screen : 'home',
+          screen: SCREENS.includes(RENAMED_SCREENS[raw.screen] ?? raw.screen) ? RENAMED_SCREENS[raw.screen] ?? raw.screen : 'home',
           type: isValidType(raw.type) ? raw.type : null,
           messages: cleanMessages(raw.messages),
           plan: cleanPlan(raw.plan),

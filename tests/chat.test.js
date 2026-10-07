@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isCrisis, makeMessage, toApiMessages, validateMessages, validateReply, HISTORY_LIMIT } from '../js/chat.js';
+import { isCrisis, makeMessage, toApiMessages, validateMessages, validateReply, keepOneQuestion, HISTORY_LIMIT } from '../js/chat.js';
 
 test('isCrisis узнаёт тревожные фразы', () => {
   for (const text of [
@@ -61,6 +61,12 @@ test('validateReply снимает JSON-обёртку и блок кода', ()
   assert.equal(validateReply({ reply: '```json\n{"reply": "Привет"}\n```' }), 'Привет');
   assert.equal(validateReply({ reply: '{"reply":"{\\"reply\\":\\"двойная\\"}"}' }), 'двойная');
   assert.equal(validateReply({ reply: '{не json' }), '{не json');
+});
+
+test('keepOneQuestion оставляет один вопрос', () => {
+  assert.equal(keepOneQuestion('Блин. Что случилось? Учёба или работа?'), 'Блин. Что случилось?');
+  assert.equal(keepOneQuestion('Что за хостинг? Пока проверь ALLOWED_HOSTS.'), 'Что за хостинг? Пока проверь ALLOWED_HOSTS.');
+  assert.equal(keepOneQuestion('Начни с введения.'), 'Начни с введения.');
 });
 
 test('validateReply чистит ответ модели', () => {

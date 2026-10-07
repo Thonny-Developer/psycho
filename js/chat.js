@@ -76,6 +76,15 @@ function unwrapReply(text) {
   return result;
 }
 
+/**
+ * Модель любит задавать по два-три вопроса за раз, и это похоже на допрос.
+ * Если вопросов больше одного, оставляем текст до первого вопроса включительно.
+ */
+export function keepOneQuestion(text) {
+  if ((text.match(/\?/g) || []).length < 2) return text;
+  return text.slice(0, text.indexOf('?') + 1).trim();
+}
+
 /** Ответ модели в чате: { reply: '...' }. */
 export function validateReply(data) {
   if (!data || typeof data !== 'object' || typeof data.reply !== 'string') return null;

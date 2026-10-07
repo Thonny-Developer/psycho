@@ -2554,3 +2554,113 @@ textarea::placeholder {
   gap: 12px;
   text-align: center;
 }
+
+/* ===== Аватары ===== */
+
+.avatar { flex: none; border-radius: 50%; }
+.av-accent { fill: var(--accent); }
+.av-mute { fill: var(--accent-mute); }
+.av-soft { fill: var(--accent-soft); }
+.av-soft2 { fill: var(--accent-soft-2); }
+.av-sand { fill: var(--sand); }
+.av-s2 { fill: var(--surface-2); }
+.av-warn { fill: var(--warn-soft); }
+.av-stroke { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; }
+.av-stroke-soft { fill: none; stroke: var(--accent-mute); stroke-width: 2; stroke-linecap: round; }
+
+/* ===== Профиль ===== */
+
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 4px;
+}
+
+.profile-hero__name {
+  font-family: var(--serif);
+  font-size: calc(24px * var(--fs));
+  font-weight: 500;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  padding: 16px;
+  border-radius: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.stat__value {
+  font-family: var(--serif);
+  font-size: calc(30px * var(--fs));
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__label {
+  font-size: calc(14px * var(--fs));
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.reminder-time {
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.input--time {
+  width: auto;
+  min-width: 120px;
+  font-variant-numeric: tabular-nums;
+}
+
+.list-card__btn:disabled {
+  opacity: .6;
+}
+
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.avatar-option {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  transition: border-color .3s, transform .3s var(--ease);
+}
+
+.avatar-option:hover {
+  transform: translateY(-2px);
+}
+
+.avatar-option[aria-checked="true"] {
+  border-color: var(--accent);
+}
+
+.avatar-option svg {
+  width: 100%;
+  height: auto;
+  max-width: 64px;
+}

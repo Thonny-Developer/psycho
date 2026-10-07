@@ -32,7 +32,7 @@ import { validateEmail, validatePassword, validateName, guestPlansForImport } fr
 import { isCrisis, makeMessage, CRISIS_REPLY, MESSAGE_MAX } from './chat.js';
 import { greetingFor, GROUND } from './content.js';
 import { IC } from './icons.js';
-import { h, icon, replaceKeepFocus, announce } from './ui.js';
+import { h, icon, replaceKeepFocus, announce, downloadJson } from './ui.js';
 import { createOnboarding } from './screens/onboarding.js';
 import { createHome } from './screens/home.js';
 import { createCalm } from './screens/calm.js';
@@ -40,9 +40,17 @@ import { createChat } from './screens/chat-screen.js';
 import { createPlanScreen } from './screens/plan-screen.js';
 import { createDone } from './screens/done.js';
 import { createSaved } from './screens/saved.js';
-import { createSettings } from './screens/settings.js';
+import { createProfile } from './screens/profile.js';
+import { createProfileEdit } from './screens/profile-edit.js';
 import { createAuth } from './screens/auth.js';
-import { createHelpDialog, createConfirmSheet, createToast, createImportSheet } from './screens/overlays.js';
+import {
+  createHelpDialog,
+  createConfirmSheet,
+  createToast,
+  createImportSheet,
+  createDeleteAccountSheet,
+} from './screens/overlays.js';
+import { computeStats, uniquePlans, buildExport, exportFileName } from './stats.js';
 
 // У гостя и у каждого аккаунта своё пространство в localStorage, чтобы данные не смешивались.
 // Сохранённая сессия Supabase читается сразу, чтобы после перезагрузки не мелькали данные гостя.
@@ -103,6 +111,12 @@ function baseState() {
     auth: { mode: 'welcome', busy: false, errors: {}, email: '', sentKind: null },
     authReturn: 'home',
     importOffer: null, // { count, busy }
+    reminderTime: null, // у гостя; у аккаунта — в профиле
+    firstSeenAt: null,
+    serverPlans: [], // все планы аккаунта с сервера, для статистики
+    exporting: false,
+    profileEdit: { busy: false, errors: {} },
+    deleteAccount: null, // { busy, error }
   };
 }
 
@@ -112,6 +126,7 @@ function initialState() {
   const session = storage.loadSession();
   Object.assign(state, prefs, { scenarios: storage.listScenarios() });
   if (restoredUser) state.account = { ...state.account, user: restoredUser };
+  state.firstSeenAt ??= Date.now();
 
   if (session) {
     Object.assign(state, session);
@@ -148,8 +163,10 @@ function persist() {
     settings: state.settings,
     accountPromptSeen: state.accountPromptSeen,
     accountHintSeen: state.accountHintSeen,
+    reminderTime: state.reminderTime,
+    firstSeenAt: state.firstSeenAt,
   });
-  const keep = ['calm', 'chat', 'plan', 'saved', 'settings', 'done'];
+  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done'];
   storage.saveSession({
     screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
     type: state.type,
@@ -241,10 +258,11 @@ const actions = {
 
   goHome: () => setState({ screen: 'home' }),
   openSaved: () => setState({ screen: 'saved' }),
-  openSettings: () => setState({ screen: 'settings' }),
+  openSettings: () => setState({ screen: 'profile' }),
   viewPlan: () => setState({ screen: 'plan' }),
 
   goBack() {
+    if (state.screen === 'profile-edit') return setState({ screen: 'profile' });
     if (state.screen === 'plan') {
       return setState({ screen: state.planFrom === 'saved' ? 'saved' : state.messages.length ? 'chat' : 'home' });
     }
@@ -488,12 +506,12 @@ const actions = {
     if (state.auth.busy) return;
     const email = String(values.email ?? '').trim();
     const errors = {};
-    if (kind !== 'reset') {
+    if (kind !== 'reset' && kind !== 'change') {
       const e = validateEmail(email);
       if (e) errors.email = e;
     }
     if (kind === 'login' && !values.password) errors.password = 'Впиши пароль';
-    if (kind === 'signup' || kind === 'reset') {
+    if (kind === 'signup' || kind === 'reset' || kind === 'change') {
       const e = validatePassword(values.password);
       if (e) errors.password = e;
     }
@@ -510,6 +528,7 @@ const actions = {
       signup: () => signUp({ email, password: values.password, name: String(values.name ?? '').trim() }),
       forgot: () => resetPassword(email),
       reset: () => updatePassword(values.password),
+      change: () => updatePassword(values.password),
     }[kind];
     const result = await request();
 
@@ -523,9 +542,9 @@ const actions = {
     if (kind === 'signup' && !result.data?.session) {
       return setState({ auth: { ...state.auth, busy: false, mode: 'sent', sentKind: 'confirm' } });
     }
-    if (kind === 'reset') {
+    if (kind === 'reset' || kind === 'change') {
       showToast('Пароль обновлён', IC.check);
-      return setState({ screen: 'home', auth: baseState().auth });
+      return setState({ screen: kind === 'change' ? 'profile' : 'home', auth: baseState().auth });
     }
     // Вход и регистрация без подтверждения почты: дальше всё сделает событие SIGNED_IN
     setState({ auth: { ...state.auth, busy: false } });
@@ -550,6 +569,77 @@ const actions = {
     await sync?.flush();
     await signOut();
     leaveAccount('signout');
+  },
+
+  openProfileEdit: () => setState({ screen: 'profile-edit', profileEdit: { busy: false, errors: {} } }),
+
+  async saveProfile({ display_name: rawName, avatar }) {
+    if (state.profileEdit.busy || !state.account.user) return;
+    const nameError = validateName(rawName);
+    if (nameError) return setState({ profileEdit: { busy: false, errors: { name: nameError } } });
+    setState({ profileEdit: { busy: true, errors: {} } });
+    const result = await updateProfile(state.account.user.id, { display_name: String(rawName).trim(), avatar });
+    if (!result.ok) {
+      const text = state.online ? 'Не получилось сохранить. Это не ты — попробуй ещё раз.' : 'Нет сети. Профиль сохранится, когда появится интернет — попробуй чуть позже.';
+      return setState({ profileEdit: { busy: false, errors: { form: text } } });
+    }
+    showToast('Профиль обновлён', IC.check);
+    setState({ account: { ...state.account, profile: result.data }, profileEdit: { busy: false, errors: {} }, screen: 'profile' });
+  },
+
+  async setReminder(time) {
+    if (!state.account.user) return setState({ reminderTime: time });
+    const previous = state.account.profile;
+    // Сразу показываем выбор, а если сервер не принял — возвращаем как было
+    setState({ account: { ...state.account, profile: { ...previous, reminder_time: time } } });
+    const result = await updateProfile(state.account.user.id, { reminder_time: time });
+    if (!result.ok) {
+      setState({ account: { ...state.account, profile: previous } });
+      showToast('Не получилось сохранить напоминание. Попробуй, когда будет интернет.', IC.info);
+      render();
+    }
+  },
+
+  async exportData() {
+    if (state.exporting) return;
+    setState({ exporting: true });
+    let plans = uniquePlans(state.scenarios, state.plan ? [state.plan] : [], state.serverPlans);
+    if (sync && state.online) {
+      const pulled = await sync.pull();
+      if (pulled) plans = uniquePlans(pulled.all, plans);
+    }
+    downloadJson(exportFileName(), buildExport({
+      account: state.account.user,
+      profile: state.account.profile,
+      settings: state.settings,
+      plans,
+      conversation: state.messages,
+    }));
+    setState({ exporting: false });
+    showToast('Файл с данными скачан', IC.download);
+    render();
+  },
+
+  askDeleteAccount: () => setState({ deleteAccount: { busy: false, error: null } }),
+  cancelDeleteAccount: () => setState({ deleteAccount: null }),
+
+  async deleteAccount() {
+    if (!state.deleteAccount || state.deleteAccount.busy) return;
+    setState({ deleteAccount: { busy: true, error: null } });
+    let error = null;
+    try {
+      const token = await getAccessToken();
+      const res = await fetch('/api/account', { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) error = (await res.json().catch(() => null))?.error ?? 'Не получилось удалить аккаунт. Это не ты — попробуй чуть позже.';
+    } catch {
+      error = 'Нет связи с сервером. Удалить аккаунт можно, когда появится интернет.';
+    }
+    if (error) return setState({ deleteAccount: { busy: false, error } });
+
+    setState({ deleteAccount: null, account: { ...state.account, signingOut: true } });
+    sync?.stop();
+    await signOut();
+    leaveAccount('deleted');
   },
 
   async acceptImport() {
@@ -670,7 +760,7 @@ async function enterAccount(user, { silent = false } = {}) {
   if (switching) Object.assign(patch, dataFromStorage());
   if (fromAuth || switching) {
     Object.assign(patch, {
-      screen: fromAuth || !['home', 'saved', 'settings', 'calm'].includes(state.screen) ? 'home' : state.screen,
+      screen: fromAuth || !['home', 'saved', 'profile', 'calm'].includes(state.screen) ? 'home' : state.screen,
       auth: baseState().auth,
       accountPromptSeen: true,
     });
@@ -689,7 +779,7 @@ async function refreshFromServer() {
   const pulled = await sync?.pull();
   if (!pulled) return;
   storage.replaceScenarios(pulled.scenarios);
-  setState({ scenarios: storage.listScenarios() });
+  setState({ scenarios: storage.listScenarios(), serverPlans: pulled.all });
 }
 
 async function loadProfile(userId) {
@@ -741,11 +831,12 @@ function leaveAccount(reason) {
   setState({
     ...dataFromStorage(),
     // Вышли из профиля — там и остаёмся, уже с карточкой гостя
-    screen: state.screen === 'settings' ? 'settings' : 'home',
+    screen: state.screen === 'profile' ? 'profile' : 'home',
     importOffer: null,
+    serverPlans: [],
     account: { ...baseState().account, enabled: state.account.enabled },
   });
-  showToast('Выход выполнен', IC.logout);
+  showToast(reason === 'deleted' ? 'Аккаунт удалён. Береги себя' : 'Выход выполнен', reason === 'deleted' ? IC.check : IC.logout);
   render();
 }
 
@@ -784,7 +875,8 @@ const SCREENS = {
   plan: createPlanScreen,
   done: createDone,
   saved: createSaved,
-  settings: createSettings,
+  profile: createProfile,
+  'profile-edit': createProfileEdit,
   auth: createAuth,
 };
 
@@ -792,7 +884,7 @@ const SCREENS = {
 const TABS = [
   { screen: 'home', label: 'Главная', icon: IC.home },
   { screen: 'saved', label: 'Планы', icon: IC.bookmark },
-  { screen: 'settings', label: 'Профиль', icon: IC.user },
+  { screen: 'profile', label: 'Профиль', icon: IC.user },
 ];
 
 let current = null;
@@ -828,7 +920,7 @@ function renderHeader() {
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
         h('span', { class: 'logo__word' }, 'Паника-режим'))
       : null,
-    ['chat', 'plan'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['chat', 'plan', 'profile-edit'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
     s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
     h('div', { class: 'header__spacer' }),
@@ -857,6 +949,17 @@ function renderBanner() {
   }
 }
 
+/** Состояние плюс вычисляемые поля для экранов. */
+function derived() {
+  const plans = uniquePlans(state.serverPlans, state.scenarios, state.plan ? [state.plan] : []);
+  return {
+    ...state,
+    reduced: isReduced(),
+    stats: computeStats(plans),
+    reminderTime: state.account.user ? state.account.profile?.reminder_time?.slice(0, 5) ?? null : state.reminderTime,
+  };
+}
+
 function renderScreen(options = {}) {
   const key = screenKey(state);
   const ctx = { state, actions };
@@ -870,7 +973,7 @@ function renderScreen(options = {}) {
       target?.focus({ preventScroll: true });
     }
   }
-  current.update?.({ ...state, reduced: isReduced() }, options);
+  current.update?.(derived(), options);
 }
 
 let layerKey = '';
@@ -879,7 +982,8 @@ let returnFocus = null;
 function renderLayers() {
   const modalKey = state.helpOpen ? `help-${state.helpReason}`
     : state.confirmClear ? 'confirm'
-      : state.importOffer ? `import-${state.importOffer.busy}` : '';
+      : state.deleteAccount ? `delete-${state.deleteAccount.busy}-${state.deleteAccount.error ?? ''}`
+        : state.importOffer ? `import-${state.importOffer.busy}` : '';
   const key = `${modalKey}|${state.toast?.key ?? ''}`;
   if (key === layerKey) return;
   const hadModal = Boolean(layerKey.split('|')[0]);
@@ -894,9 +998,11 @@ function renderLayers() {
       ? createHelpDialog({ crisis: state.helpReason === 'crisis', onClose: closeHelp, onBreathe: helpBreathe })
       : state.confirmClear
         ? createConfirmSheet({ onCancel: () => setState({ confirmClear: false }), onConfirm: clearAll })
-        : state.importOffer
-          ? createImportSheet({ ...state.importOffer, onImport: actions.acceptImport, onSkip: actions.declineImport })
-          : null;
+        : state.deleteAccount
+          ? createDeleteAccountSheet({ ...state.deleteAccount, onCancel: actions.cancelDeleteAccount, onConfirm: actions.deleteAccount })
+          : state.importOffer
+            ? createImportSheet({ ...state.importOffer, onImport: actions.acceptImport, onSkip: actions.declineImport })
+            : null;
   }
   els.layers.replaceChildren(
     ...[modal, state.toast ? createToast(state.toast, () => state.toast?.action?.()) : null].filter(Boolean),
@@ -929,7 +1035,8 @@ darkQuery.addEventListener?.('change', () => render());
 motionQuery.addEventListener?.('change', () => render());
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
-  if (state.importOffer && !state.importOffer.busy) actions.declineImport();
+  if (state.deleteAccount && !state.deleteAccount.busy) actions.cancelDeleteAccount();
+  else if (state.importOffer && !state.importOffer.busy) actions.declineImport();
   else if (state.confirmClear) setState({ confirmClear: false });
   else if (state.helpOpen) closeHelp();
 });

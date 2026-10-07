@@ -79,6 +79,43 @@ export function createImportSheet({ count, busy, onImport, onSkip }) {
         h('button', { class: 'btn btn--text', type: 'button', disabled: busy, onClick: onSkip }, 'Не переносить'))));
 }
 
+/** Удаление аккаунта: нужно написать «удалить», чтобы случайно не нажать. */
+export function createDeleteAccountSheet({ busy, error, onCancel, onConfirm }) {
+  const WORD = 'удалить';
+  const keep = h('button', { class: 'btn', type: 'button', disabled: busy, onClick: onCancel }, 'Оставить аккаунт');
+  const input = h('input', {
+    id: 'delete-confirm',
+    class: 'input',
+    type: 'text',
+    autocomplete: 'off',
+    autocapitalize: 'off',
+    spellcheck: 'false',
+    readOnly: busy,
+    'aria-describedby': 'delete-text',
+  });
+  const remove = h('button', {
+    class: 'btn btn--outline-warn',
+    type: 'button',
+    disabled: true,
+    'aria-busy': String(busy),
+    onClick: () => onConfirm(),
+  }, h('span', { class: 'btn__spinner', 'aria-hidden': 'true' }), busy ? 'Удаляю…' : 'Удалить навсегда');
+  input.addEventListener('input', () => {
+    remove.disabled = busy || input.value.trim().toLowerCase() !== WORD;
+  });
+
+  return h('div', { class: 'sheet-overlay', onClick: (e) => { if (e.target === e.currentTarget && !busy) onCancel(); }, ref: (el) => { el.focusTarget = keep; } },
+    h('div', { class: 'sheet', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'delete-title', 'aria-describedby': 'delete-text' },
+      h('h2', { id: 'delete-title' }, 'Удалить аккаунт?'),
+      h('p', { id: 'delete-text', class: 'text-16 muted' },
+        'Удалятся профиль, все планы и серия — с сервера и с этого устройства. Вернуть их не получится. Если хочешь сохранить копию, сначала скачай данные.'),
+      h('label', { class: 'field' },
+        h('span', { class: 'field__label' }, `Чтобы подтвердить, напиши «${WORD}»`),
+        input),
+      error ? h('div', { class: 'warn-card text-15', role: 'alert' }, error) : null,
+      h('div', { class: 'sheet__actions' }, keep, remove)));
+}
+
 export function createToast(toast, onAction) {
   return h('div', { class: 'toast', role: 'status' },
     icon(toast.icon ?? IC.info, 20, { strokeWidth: 2 }),
