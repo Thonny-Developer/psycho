@@ -4,6 +4,13 @@ import { CHIPS, typeLabel } from '../content.js';
 import { MESSAGE_MAX } from '../chat.js';
 
 function messageNode(m, actions) {
+  if (m.role === 'plan') {
+    return h('div', { class: 'plan-card' },
+      h('span', { class: 'plan-card__title' },
+        h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.list, 18, { strokeWidth: 1.9 })),
+        h('span', {}, h('span', { class: 'text-14 muted', style: { display: 'block', fontWeight: '400' } }, 'План готов'), m.text)),
+      h('button', { class: 'btn btn--sm', type: 'button', onClick: () => actions.openChatPlan(m.planId) }, 'Открыть план'));
+  }
   if (m.role === 'crisis') {
     return h('div', { class: 'crisis-card' },
       h('span', { class: 'crisis-card__title' },

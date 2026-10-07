@@ -56,6 +56,13 @@ test('validateMessages проверяет историю на сервере', (
   assert.equal(validateMessages(Array(25).fill({ role: 'user', text: 'а'.repeat(400) })), null, 'общий лимит символов');
 });
 
+test('validateReply снимает JSON-обёртку и блок кода', () => {
+  assert.equal(validateReply({ reply: '{"reply":"Кажется, просто тяжело."}' }), 'Кажется, просто тяжело.');
+  assert.equal(validateReply({ reply: '```json\n{"reply": "Привет"}\n```' }), 'Привет');
+  assert.equal(validateReply({ reply: '{"reply":"{\\"reply\\":\\"двойная\\"}"}' }), 'двойная');
+  assert.equal(validateReply({ reply: '{не json' }), '{не json');
+});
+
 test('validateReply чистит ответ модели', () => {
   assert.equal(validateReply({ reply: 'Помощник: Слышу тебя.  Что горит?' }), 'Слышу тебя. Что горит?');
   assert.equal(validateReply({ reply: '' }), null);

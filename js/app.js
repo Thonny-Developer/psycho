@@ -6,6 +6,7 @@ import {
   insertSubsteps,
   findStep,
   isValidType,
+  plural,
 } from './plan.js';
 import { getFallbackSteps, FALLBACK_TITLE } from './fallback.js';
 import { requestReply, requestPlan, requestSplit, describeError } from './api.js';
@@ -212,6 +213,27 @@ const actions = {
     split: {},
   }),
 
+  /** «Своя ситуация»: сразу в чат, без дыхания — человек пришёл рассказать сам. */
+  startChat: (type) => setState({
+    type,
+    screen: 'chat',
+    conversation: state.conversation + 1,
+    messages: [makeMessage('ai', greetingFor(type))],
+    ai: 'idle',
+    plan: null,
+    planStatus: 'idle',
+    split: {},
+  }),
+
+  /** Карточка «План готов» в чате открывает план, если он ещё существует. */
+  openChatPlan(planId) {
+    if (state.plan?.id === planId) return setState({ screen: 'plan', planFrom: 'chat' });
+    const saved = state.scenarios.find((s) => s.id === planId);
+    if (saved) return setState({ plan: saved, planStatus: 'ready', screen: 'plan', planFrom: 'chat', split: {} });
+    showToast('Этот план уже заменён новым', IC.info);
+    return render();
+  },
+
   setCalmMode: (mode) => setState({ calmMode: mode, ground: mode === 'ground' ? 0 : state.ground }),
   nextGround: () => setState({ ground: Math.min(GROUND.length, state.ground + 1) }),
 
@@ -393,9 +415,29 @@ async function reply() {
   const { type, messages, conversation } = state;
   setState({ ai: 'typing' });
   try {
-    const text = await requestReply({ type, messages });
+    const result = await requestReply({ type, messages });
     if (state.conversation !== conversation) return;
-    setState({ ai: 'idle', messages: [...state.messages, makeMessage('ai', text)] });
+    const added = result.reply ? [makeMessage('ai', result.reply)] : [];
+
+    if (!result.plan) return setState({ ai: 'idle', messages: [...state.messages, ...added] });
+
+    // Модель сама собрала план через инструмент: карточка в чате и сразу экран плана
+    const plan = createPlan({ type: type ?? 'all', title: result.plan.title, steps: result.plan.steps, source: 'api' });
+    const n = plan.steps.length;
+    if (!added.length) {
+      added.push(makeMessage('ai', `План из ${n} ${plural(n, ['шага', 'шагов', 'шагов'])} готов. Начни с первого — он самый лёгкий.`));
+    }
+    added.push(makeMessage('plan', plan.title, { planId: plan.id }));
+    setState({
+      ai: 'idle',
+      messages: [...state.messages, ...added],
+      plan,
+      planStatus: 'ready',
+      planFrom: 'chat',
+      split: {},
+      screen: 'plan',
+    });
+    announce(`План готов: ${plan.title}`);
   } catch (error) {
     if (state.conversation !== conversation) return;
     setState({ ai: 'error', aiErrorText: chatErrorText(error) });

@@ -43,7 +43,7 @@ function cleanMessages(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter(
     (m) => m && typeof m === 'object' && typeof m.id === 'string' &&
-      ['ai', 'user', 'crisis'].includes(m.role) && typeof m.text === 'string',
+      ['ai', 'user', 'crisis', 'plan'].includes(m.role) && typeof m.text === 'string',
   );
 }
 

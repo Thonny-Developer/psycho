@@ -7,6 +7,7 @@ export const PROBLEM_TYPES = {
   topic: 'Не понимаю тему',
   bug: 'Сломался код',
   all: 'Всё сразу',
+  other: 'Своя ситуация',
 };
 
 export const STEP_TITLE_MAX = 160;

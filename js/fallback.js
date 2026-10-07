@@ -53,6 +53,9 @@ export const FALLBACK_PLANS = {
 
 export const FALLBACK_TITLE = 'План на сейчас';
 
+// Для своей ситуации подходит общий план «Всё сразу»
+FALLBACK_PLANS.other = FALLBACK_PLANS.all;
+
 export function getFallbackSteps(type) {
   return (FALLBACK_PLANS[type] ?? FALLBACK_PLANS.all).map((step) => ({ ...step }));
 }

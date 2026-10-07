@@ -18,12 +18,13 @@ export function isCrisis(text) {
 }
 
 /**
- * role: ai | user | crisis (карточка «С живым человеком бывает легче»).
+ * role: ai | user | crisis (карточка «С живым человеком бывает легче») | plan (карточка готового плана, text — id плана).
  * private: сообщение не уходит в AI — кризисные реплики остаются только на устройстве.
  */
-export function makeMessage(role, text = '', { private: isPrivate = false } = {}) {
+export function makeMessage(role, text = '', { private: isPrivate = false, planId = null } = {}) {
   const message = { id: makeId(), role, text };
   if (isPrivate) message.private = true;
+  if (planId) message.planId = planId;
   return message;
 }
 
@@ -53,10 +54,32 @@ export function validateMessages(value, { min = 0 } = {}) {
   return messages;
 }
 
+/**
+ * Модель иногда заворачивает реплику в JSON или в блок кода: {"reply":"..."}.
+ * Снимаем такие обёртки, чтобы в чате был только текст.
+ */
+function unwrapReply(text) {
+  let result = text.trim();
+  for (let i = 0; i < 3; i++) {
+    const fenced = result.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (fenced) result = fenced[1].trim();
+    if (!result.startsWith('{')) break;
+    try {
+      const parsed = JSON.parse(result);
+      const inner = parsed?.reply ?? parsed?.text ?? parsed?.message;
+      if (typeof inner !== 'string') break;
+      result = inner.trim();
+    } catch {
+      break;
+    }
+  }
+  return result;
+}
+
 /** Ответ модели в чате: { reply: '...' }. */
 export function validateReply(data) {
   if (!data || typeof data !== 'object' || typeof data.reply !== 'string') return null;
-  const reply = data.reply
+  const reply = unwrapReply(data.reply)
     .replace(/^\s*(Помощник|Ассистент)\s*:\s*/i, '')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')

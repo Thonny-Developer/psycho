@@ -79,7 +79,8 @@ test('isPlanShape отсекает битые данные', () => {
   assert.equal(isPlanShape(makePlan()), true);
   assert.equal(isPlanShape(JSON.parse(JSON.stringify(makePlan()))), true);
   assert.equal(isPlanShape(null), false);
-  assert.equal(isPlanShape({ ...makePlan(), type: 'other' }), false);
+  assert.equal(isPlanShape({ ...makePlan(), type: 'hack' }), false);
+  assert.equal(isPlanShape({ ...makePlan(), type: 'other' }), true, 'своя ситуация');
   assert.equal(isPlanShape({ ...makePlan(), title: undefined }), false);
   assert.equal(isPlanShape({ ...makePlan(), steps: [] }), false);
   assert.equal(isPlanShape({ ...makePlan(), steps: [{ id: 'x', title: 'y' }] }), false);

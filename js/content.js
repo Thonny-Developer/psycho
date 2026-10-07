@@ -36,9 +36,18 @@ const TYPE_DETAILS = {
     icon: IC.waves,
     greet: 'Когда всё сразу, кажется, что не вывезти. Давай просто перечислим, что висит, — без порядка, как вспоминается.',
   },
+  other: {
+    hint: 'Опишу своими словами',
+    icon: IC.chat,
+    greet: 'Расскажи своими словами, что случилось. Можно коротко — я задам пару вопросов и соберу план.',
+  },
 };
 
-export const TYPES = Object.entries(PROBLEM_TYPES).map(([key, label]) => ({ key, label, ...TYPE_DETAILS[key] }));
+const ALL_TYPES = Object.entries(PROBLEM_TYPES).map(([key, label]) => ({ key, label, ...TYPE_DETAILS[key] }));
+
+/** Карточки тем на главной; «Своя ситуация» идёт отдельной кнопкой под ними */
+export const TYPES = ALL_TYPES.filter((t) => t.key !== 'other');
+export const OWN_TOPIC = ALL_TYPES.find((t) => t.key === 'other');
 
 export const PANIC_GREET = 'Я рядом. Что сейчас происходит? Можно коротко, как получится, — хоть одним словом.';
 

@@ -1,6 +1,6 @@
 import { h, icon, replaceKeepFocus } from '../ui.js';
 import { IC } from '../icons.js';
-import { TYPES, greetingByHour } from '../content.js';
+import { TYPES, OWN_TOPIC, greetingByHour } from '../content.js';
 import { getProgress } from '../plan.js';
 
 export function miniPlan(scenario, onOpen) {
@@ -34,7 +34,12 @@ export function createHome({ actions }) {
               h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(t.icon, 21)),
               h('span', {},
                 h('span', { class: 'type-card__label' }, t.label),
-                h('span', { class: 'type-card__hint' }, t.hint)))))),
+                h('span', { class: 'type-card__hint' }, t.hint)))),
+            h('button', { class: 'type-card type-card--wide', type: 'button', onClick: () => actions.startChat(OWN_TOPIC.key) },
+              h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(OWN_TOPIC.icon, 21)),
+              h('span', {},
+                h('span', { class: 'type-card__label' }, OWN_TOPIC.label),
+                h('span', { class: 'type-card__hint' }, `${OWN_TOPIC.hint} — сразу в разговор`))))),
         h('div', { class: 'stack', style: { gap: '10px' } },
           h('div', { class: 'section-head' },
             h('h2', { class: 'h-section' }, 'Мои сценарии'),

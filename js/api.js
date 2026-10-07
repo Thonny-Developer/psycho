@@ -60,11 +60,16 @@ function invalid() {
   return new PlanApiError('invalid', 'Сервис вернул непонятный ответ');
 }
 
-/** Следующая реплика помощника в чате. */
+/**
+ * Следующий ход помощника в чате: { reply, plan }.
+ * Если информации хватает, модель сама собирает план через инструмент — тогда plan не пустой.
+ */
 export async function requestReply({ type, messages }) {
-  const reply = validateReply(await post({ action: 'chat', type, messages: toApiMessages(messages) }));
-  if (!reply) throw invalid();
-  return reply;
+  const data = await post({ action: 'chat', type, messages: toApiMessages(messages) });
+  const reply = typeof data?.reply === 'string' ? validateReply(data) : null;
+  const plan = data?.plan ? validatePlan(data.plan) : null;
+  if (!reply && !plan) throw invalid();
+  return { reply, plan };
 }
 
 /** План по разговору: { title, steps }. */
