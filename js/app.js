@@ -6,322 +6,550 @@ import {
   insertSubsteps,
   findStep,
   isValidType,
-  plural,
 } from './plan.js';
-import { getFallbackSteps } from './fallback.js';
-import { requestSteps } from './api.js';
-import { createStorage, MAX_SCENARIOS } from './storage.js';
-import {
-  getElements,
-  renderForm,
-  renderPlan,
-  renderSaved,
-  renderView,
-  renderCounter,
-  announce,
-} from './render.js';
+import { getFallbackSteps, FALLBACK_TITLE } from './fallback.js';
+import { requestReply, requestPlan, requestSplit, describeError } from './api.js';
+import { createStorage, DEFAULT_SETTINGS, MAX_SCENARIOS } from './storage.js';
+import { isCrisis, makeMessage, CRISIS_REPLY, MESSAGE_MAX } from './chat.js';
+import { greetingFor, GROUND } from './content.js';
+import { IC } from './icons.js';
+import { h, icon, replaceKeepFocus, announce } from './ui.js';
+import { createOnboarding } from './screens/onboarding.js';
+import { createHome } from './screens/home.js';
+import { createCalm } from './screens/calm.js';
+import { createChat } from './screens/chat-screen.js';
+import { createPlanScreen } from './screens/plan-screen.js';
+import { createDone } from './screens/done.js';
+import { createSaved } from './screens/saved.js';
+import { createSettings } from './screens/settings.js';
+import { createHelpDialog, createConfirmSheet, createToast } from './screens/overlays.js';
 
-const els = getElements();
 const storage = createStorage();
+const FONT_SCALE = { m: 1, l: 1.12, xl: 1.25 };
+const DONE_DELAY = 1100;
 
-const state = {
-  view: 'form',
-  plan: null,
-  loading: false,
-  typeError: null,
-  formError: null,
-  saveError: null,
-  breakdown: {}, // stepId -> { loading: true } | { error: 'текст' }
-  newIds: new Set(), // элементы, которые нужно один раз анимировать при появлении
-  scenarios: [],
-  savedError: null,
-  pendingDelete: null, // id сценария, для которого ждём подтверждения удаления
+const media = (query) => window.matchMedia?.(query) ?? { matches: false, addEventListener() {} };
+const darkQuery = media('(prefers-color-scheme: dark)');
+const motionQuery = media('(prefers-reduced-motion: reduce)');
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  inner: $('app-inner'),
+  header: $('header'),
+  banner: $('net-banner'),
+  stage: $('stage'),
+  layers: $('layers'),
+  themeColor: document.querySelector('meta[name="theme-color"]'),
 };
 
-let pendingDeleteTimer = null;
+// ---------- Состояние ----------
 
-function render(options) {
-  renderView(els, state);
-  renderForm(els, state);
-  renderPlan(els, state, options);
-  renderSaved(els, state, options);
-  state.newIds.clear();
+function baseState() {
+  return {
+    screen: 'onb',
+    onb: 0,
+    onboarded: false,
+    settings: { ...DEFAULT_SETTINGS },
+    type: null,
+    calmMode: 'breath',
+    ground: 0,
+    conversation: 0, // меняется при каждом новом разговоре, чтобы поздние ответы AI не попали в чужой
+    messages: [],
+    ai: 'idle',
+    aiErrorText: '',
+    plan: null,
+    planStatus: 'idle',
+    planFrom: 'chat',
+    planRetrying: false,
+    split: {}, // stepId -> 'loading' | { error }
+    newIds: new Set(),
+    scenarios: [],
+    toast: null,
+    helpOpen: false,
+    helpReason: 'manual',
+    confirmClear: false,
+    dataOpen: false,
+    online: navigator.onLine !== false,
+  };
 }
 
+function initialState() {
+  const state = baseState();
+  const prefs = storage.loadPrefs();
+  const session = storage.loadSession();
+  Object.assign(state, prefs, { scenarios: storage.listScenarios() });
+
+  if (session) {
+    Object.assign(state, session);
+    state.planStatus = session.plan ? 'ready' : 'idle';
+  }
+
+  if (!state.onboarded) state.screen = 'onb';
+  else if (state.screen === 'onb') state.screen = 'home';
+  else if (['plan', 'done'].includes(state.screen) && !state.plan) state.screen = 'home';
+  else if (state.screen === 'chat' && !state.messages.length) state.screen = 'home';
+
+  // Перезагрузка во время ответа AI: реплика пользователя осталась без ответа
+  const last = state.messages.at(-1);
+  if (state.screen === 'chat' && last?.role === 'user' && !last.private) {
+    state.ai = 'error';
+    state.aiErrorText = 'Ответ не успел прийти. Это не ты — попробуем ещё раз.';
+  }
+  return state;
+}
+
+let state = initialState();
+
+function isReduced(s = state) {
+  return s.settings.reduce ?? motionQuery.matches;
+}
+
+let storageWarned = false;
+
+function persist() {
+  const prefs = storage.savePrefs({ onboarded: state.onboarded, settings: state.settings });
+  const keep = ['calm', 'chat', 'plan', 'saved', 'settings', 'done'];
+  storage.saveSession({
+    screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
+    type: state.type,
+    messages: state.messages,
+    plan: state.planStatus === 'ready' ? state.plan : null,
+    planFrom: state.planFrom,
+    calmMode: state.calmMode,
+  });
+  if (!prefs.ok && !storageWarned) {
+    storageWarned = true;
+    showToast('Браузер не даёт сохранять данные. После перезагрузки всё начнётся заново.', IC.info);
+  }
+}
+
+function setState(patch, options) {
+  state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
+  persist();
+  render(options);
+}
+
+// ---------- Тосты ----------
+
+let toastTimer = null;
+
+function showToast(text, iconPath = IC.info, actionLabel = null, action = null) {
+  clearTimeout(toastTimer);
+  state = { ...state, toast: { text, icon: iconPath, actionLabel, action, key: Date.now() } };
+  announce(actionLabel ? `${text}. Можно нажать «${actionLabel}»` : text);
+  toastTimer = setTimeout(() => setState({ toast: null }), action ? 6500 : 4200);
+}
+
+// ---------- Действия ----------
+
 const STORAGE_ERRORS = {
-  quota: 'В браузере закончилось место для сохранений. Удали старые сценарии.',
+  quota: 'В браузере закончилось место. Удали старые сценарии.',
   unavailable: 'Браузер не даёт сохранять данные, например в приватном режиме.',
   limit: `Можно сохранить до ${MAX_SCENARIOS} сценариев. Удали ненужные, чтобы добавить новый.`,
 };
 
-/**
- * Сохраняет текущий план, чтобы он пережил перезагрузку,
- * и синхронизирует его с сохранённым сценарием, если он там есть.
- */
-function persistPlan() {
-  const current = storage.saveCurrent(state.plan);
-  let synced = { ok: true };
-  if (state.plan) {
-    synced = storage.updateScenario(state.plan);
-    state.scenarios = synced.scenarios;
+function chatErrorText(error) {
+  if (error.kind === 'offline' || !navigator.onLine) {
+    return 'Сейчас нет сети, поэтому ответить не получится. Это не ты. Могу показать офлайн-план.';
   }
-  const error = !current.ok ? current.error : !synced.ok ? synced.error : null;
-  state.saveError = error
-    ? { message: `Прогресс не сохранится после перезагрузки. ${STORAGE_ERRORS[error]}` }
-    : null;
+  if (error.kind === 'rate_limit') return 'Слишком много сообщений за минуту. Подожди немного — и попробуем ещё раз.';
+  if (error.kind === 'timeout') return 'AI долго не отвечал. Это не ты — попробуем ещё раз.';
+  return 'Не получилось связаться. Это не ты — попробуем ещё раз.';
 }
 
-function selectedType() {
-  return els.form.elements.type.value;
+/** Сохранённый план синхронизируется со списком сценариев при каждом изменении. */
+function commitPlan(plan) {
+  const result = storage.updateScenario(plan);
+  return { plan, scenarios: result.scenarios };
 }
 
-/** Короткое объяснение для плашки офлайн-плана. */
-function fallbackReason(error) {
-  switch (error.kind) {
-    case 'offline':
-      return 'Нет интернета.';
-    case 'timeout':
-      return 'Сервис долго не отвечал.';
-    case 'rate_limit':
-      return 'Слишком много запросов, попробуй через минуту.';
-    default:
-      return 'Сервис сейчас недоступен.';
-  }
-}
+let doneTimer = null;
 
-function showPlan(plan) {
-  state.plan = plan;
-  state.view = 'plan';
-  state.breakdown = {};
-  state.newIds = new Set(plan.steps.map((s) => s.id));
-  persistPlan();
-  render();
-  els.planTitle.focus({ preventScroll: true });
-  window.scrollTo({ top: 0 });
-  const n = plan.steps.length;
-  announce(els, `План готов: ${n} ${plural(n, ['шаг', 'шага', 'шагов'])}${plan.source === 'fallback' ? ', офлайн-версия' : ''}`);
-}
-
-/**
- * Основной сценарий: просим план у API, при любой проблеме с сервисом показываем шаблон.
- * Ошибку без плана показываем только на некорректный запрос: шаблон тут ничего не исправит.
- */
-async function buildPlan({ type, description }) {
-  if (state.loading) return;
-  state.loading = true;
-  state.formError = null;
-  render();
-
-  try {
-    const steps = await requestSteps({ type, description });
-    showPlan(createPlan({ type, description, steps, source: 'api' }));
-  } catch (error) {
-    if (error.kind === 'bad_request') {
-      state.formError = { message: error.message, retryAction: 'retry-submit' };
-    } else {
-      // Причина хранится в самом плане, чтобы плашка была точной и после перезагрузки
-      const plan = createPlan({ type, description, steps: getFallbackSteps(type), source: 'fallback' });
-      showPlan({ ...plan, fallbackReason: fallbackReason(error) });
-    }
-  } finally {
-    state.loading = false;
-    render();
-    // кнопка была disabled и потеряла фокус: возвращаем его к ошибке
-    if (state.formError) els.formError.querySelector('button')?.focus();
-  }
-}
-
-/** Повтор из плашки офлайн-плана: при неудаче текущий план с отметками остаётся на месте. */
-async function retryPlan() {
-  const { plan } = state;
-  if (state.loading || !plan) return;
-  state.loading = true;
-  render({ focusKey: 'retry-plan' });
-
-  try {
-    const steps = await requestSteps({ type: plan.type, description: plan.description });
-    state.loading = false;
-    showPlan(createPlan({ type: plan.type, description: plan.description, steps, source: 'api' }));
-  } catch (error) {
-    state.loading = false;
-    if (state.plan === plan) {
-      state.plan = { ...plan, fallbackReason: `${fallbackReason(error)} Попробуй позже.` };
-      persistPlan();
-    }
-    render({ focusKey: 'retry-plan' });
-    announce(els, 'Сервис всё ещё недоступен, остаётся офлайн-план');
-  }
-}
-
-function onSubmit(event) {
-  event.preventDefault();
-  if (state.loading) return;
-
-  const type = selectedType();
-  if (!isValidType(type)) {
-    state.typeError = 'Выбери, что случилось, и план подстроится под ситуацию';
-    render();
-    els.form.querySelector('input[name="type"]').focus();
-    return;
-  }
-  state.typeError = null;
-  buildPlan({ type, description: els.description.value.trim() });
-}
-
-async function breakdownStep(stepId) {
-  const plan = state.plan;
-  const step = findStep(plan, stepId);
-  if (!step || state.breakdown[stepId]?.loading) return;
-
-  state.breakdown[stepId] = { loading: true };
-  render();
-
-  try {
-    const substeps = await requestSteps({ type: plan.type, description: plan.description, step: step.title });
-    // Пока ждали ответ, пользователь мог открыть другой план
-    if (state.plan?.id !== plan.id || !findStep(state.plan, stepId)) return;
-
-    delete state.breakdown[stepId];
-    state.plan = insertSubsteps(state.plan, stepId, substeps);
-    persistPlan();
-    const inserted = findStep(state.plan, stepId).substeps;
-    inserted.forEach((sub) => state.newIds.add(sub.id));
-    render({ focusKey: `check-${inserted[0].id}` });
-    announce(els, `Добавлено подшагов: ${inserted.length}`);
-  } catch (error) {
-    if (state.plan?.id !== plan.id) return;
-    const reason = error.kind === 'offline' ? 'Нет интернета.' : fallbackReason(error);
-    state.breakdown[stepId] = { error: `Не получилось разбить шаг. ${reason}` };
-    render();
-  }
-}
-
-function updatePlan(plan) {
-  const before = getProgress(state.plan);
-  state.plan = plan;
-  persistPlan();
-  render();
-
+function afterToggle(before, plan) {
   const after = getProgress(plan);
-  if (after.complete && !before.complete) announce(els, 'Все шаги выполнены. Можно выдохнуть');
-  else if (after.done !== before.done) announce(els, `Выполнено ${after.done} из ${after.total}`);
-}
-
-function onPlanChange(event) {
-  const input = event.target;
-  const { action, stepId, substepId } = input.dataset;
-  if (action === 'toggle-step') updatePlan(setStepDone(state.plan, stepId, input.checked));
-  if (action === 'toggle-substep') updatePlan(setSubstepDone(state.plan, stepId, substepId, input.checked));
-}
-
-function onPlanClick(event) {
-  const button = event.target.closest('button[data-action]');
-  if (!button) return;
-  const { action, stepId } = button.dataset;
-
-  if (action === 'breakdown') breakdownStep(stepId);
-  if (action === 'retry-plan') retryPlan();
-  if (action === 'save') saveScenario();
-  if (action === 'new-plan') {
-    state.view = 'form';
-    state.plan = null;
-    state.breakdown = {};
-    persistPlan();
-    render();
-    els.form.querySelector('input[name="type"]:checked, input[name="type"]').focus();
+  clearTimeout(doneTimer);
+  if (after.complete && !before.complete) {
+    announce('Все шаги выполнены');
+    // Пауза, чтобы человек увидел последнюю галочку, потом экран «Готово»
+    doneTimer = setTimeout(() => {
+      if (state.screen !== 'plan' || state.plan?.id !== plan.id || !getProgress(state.plan).complete) return;
+      const saved = storage.addScenario(state.plan);
+      setState({ screen: 'done', scenarios: saved.scenarios });
+    }, DONE_DELAY);
+  } else if (after.done !== before.done) {
+    announce(`Сделано ${after.done} из ${after.total}`);
   }
 }
 
-function saveScenario() {
-  if (!state.plan || state.scenarios.some((s) => s.id === state.plan.id)) return;
-  const result = storage.addScenario(state.plan);
-  state.scenarios = result.scenarios;
-  state.saveError = result.ok
-    ? null
-    : { message: STORAGE_ERRORS[result.error], retryAction: result.error === 'limit' ? null : 'save' };
-  render({ focusKey: 'save' });
-  if (result.ok) announce(els, 'Сценарий сохранён');
-}
+const actions = {
+  nextOnboarding: () => setState({ onb: Math.min(2, state.onb + 1) }),
+  skipOnboarding: () => setState({ onb: 2 }),
+  finishOnboarding: () => setState({ onboarded: true, screen: 'home', onb: 0 }),
+  replayOnboarding: () => setState({ screen: 'onb', onb: 0 }),
 
-function openScenario(id) {
-  const scenario = state.scenarios.find((s) => s.id === id);
-  if (!scenario) return;
-  state.plan = scenario;
-  state.view = 'plan';
-  state.breakdown = {};
-  state.saveError = null;
-  persistPlan();
-  render();
-  els.planTitle.focus({ preventScroll: true });
-  window.scrollTo({ top: 0 });
-  announce(els, 'Сценарий открыт');
-}
+  goHome: () => setState({ screen: 'home' }),
+  openSaved: () => setState({ screen: 'saved' }),
+  openSettings: () => setState({ screen: 'settings' }),
+  viewPlan: () => setState({ screen: 'plan' }),
 
-function resetPendingDelete() {
-  clearTimeout(pendingDeleteTimer);
-  if (state.pendingDelete) {
-    state.pendingDelete = null;
-    renderSaved(els, state);
-  }
-}
-
-/** Удаление в два нажатия: первое спрашивает «Точно удалить?», второе удаляет. */
-function deleteScenario(id) {
-  if (state.pendingDelete !== id) {
-    clearTimeout(pendingDeleteTimer);
-    state.pendingDelete = id;
-    renderSaved(els, state);
-    pendingDeleteTimer = setTimeout(resetPendingDelete, 4000);
-    return;
-  }
-
-  clearTimeout(pendingDeleteTimer);
-  state.pendingDelete = null;
-  const index = state.scenarios.findIndex((s) => s.id === id);
-  const result = storage.deleteScenario(id);
-  state.scenarios = result.scenarios;
-  state.savedError = result.ok ? null : { message: STORAGE_ERRORS[result.error] };
-
-  // Фокус на соседний сценарий, а если список опустел, то на заголовок раздела
-  const next = state.scenarios[Math.min(index, state.scenarios.length - 1)];
-  render({ focusKey: next ? `open-${next.id}` : undefined });
-  if (!next) els.savedTitle.focus();
-  if (result.ok) announce(els, 'Сценарий удалён');
-}
-
-function onSavedClick(event) {
-  const button = event.target.closest('button[data-action]');
-  if (!button) return;
-  const { action, id } = button.dataset;
-  if (action === 'open-scenario') openScenario(id);
-  if (action === 'delete-scenario') deleteScenario(id);
-}
-
-function init() {
-  els.form.addEventListener('submit', onSubmit);
-  els.form.addEventListener('change', (event) => {
-    if (event.target.name === 'type' && state.typeError) {
-      state.typeError = null;
-      render();
+  goBack() {
+    if (state.screen === 'plan') {
+      return setState({ screen: state.planFrom === 'saved' ? 'saved' : state.messages.length ? 'chat' : 'home' });
     }
-  });
-  els.formError.addEventListener('click', (event) => {
-    if (event.target.closest('[data-action="retry-submit"]')) els.form.requestSubmit();
-  });
-  els.description.addEventListener('input', () => renderCounter(els));
-  els.viewPlan.addEventListener('change', onPlanChange);
-  els.viewPlan.addEventListener('click', onPlanClick);
-  els.savedList.addEventListener('click', onSavedClick);
+    return setState({ screen: 'home' });
+  },
 
-  state.scenarios = storage.listScenarios();
-  const current = storage.loadCurrent();
-  if (current) {
-    state.plan = current;
-    state.view = 'plan';
+  startCalm: (type) => setState({
+    type: isValidType(type) ? type : null,
+    screen: 'calm',
+    calmMode: 'breath',
+    ground: 0,
+    conversation: state.conversation + 1,
+    messages: [],
+    ai: 'idle',
+    plan: null,
+    planStatus: 'idle',
+    split: {},
+  }),
+
+  setCalmMode: (mode) => setState({ calmMode: mode, ground: mode === 'ground' ? 0 : state.ground }),
+  nextGround: () => setState({ ground: Math.min(GROUND.length, state.ground + 1) }),
+
+  calmDone() {
+    const messages = state.messages.length ? state.messages : [makeMessage('ai', greetingFor(state.type))];
+    setState({ screen: 'chat', messages });
+  },
+
+  /** Возвращает true, если сообщение принято (поле ввода можно очистить). */
+  sendMessage(raw) {
+    const text = String(raw ?? '').trim().slice(0, MESSAGE_MAX);
+    if (!text || state.ai === 'typing') return false;
+
+    if (isCrisis(text)) {
+      // Такие сообщения не уходят в AI: сразу показываем живую помощь
+      setState({
+        messages: [
+          ...state.messages,
+          makeMessage('user', text, { private: true }),
+          makeMessage('ai', CRISIS_REPLY, { private: true }),
+          makeMessage('crisis', '', { private: true }),
+        ],
+        ai: 'idle',
+        helpOpen: true,
+        helpReason: 'crisis',
+      });
+      return true;
+    }
+
+    setState({ messages: [...state.messages, makeMessage('user', text)] });
+    reply();
+    return true;
+  },
+
+  retryReply: () => reply(),
+
+  async makePlan() {
+    if (state.planStatus === 'loading') return;
+    const { type, messages, conversation } = state;
+    setState({ screen: 'plan', planStatus: 'loading', plan: null, planFrom: 'chat', split: {}, ai: state.ai === 'error' ? 'idle' : state.ai });
+
+    let plan;
+    try {
+      const result = await requestPlan({ type, messages });
+      plan = createPlan({ type: type ?? 'all', title: result.title, steps: result.steps, source: 'api' });
+    } catch (error) {
+      plan = createPlan({
+        type: type ?? 'all',
+        title: FALLBACK_TITLE,
+        steps: getFallbackSteps(type ?? 'all'),
+        source: 'fallback',
+        fallbackReason: describeError(error),
+      });
+    }
+    // Пока ждали, человек мог начать новый разговор
+    if (state.conversation !== conversation) return;
+    setState({ plan, planStatus: 'ready', newIds: new Set() });
+    announce(`План готов: ${plan.title}`);
+  },
+
+  showOfflinePlan() {
+    const type = state.type ?? 'all';
+    const plan = createPlan({
+      type,
+      title: FALLBACK_TITLE,
+      steps: getFallbackSteps(type),
+      source: 'fallback',
+      fallbackReason: state.online ? 'Связаться с AI не получилось.' : 'Сейчас нет сети.',
+    });
+    setState({ screen: 'plan', planFrom: 'chat', ai: 'idle', planStatus: 'ready', plan, split: {} });
+  },
+
+  /** Повтор для офлайн-плана: при неудаче текущий план с отметками остаётся. */
+  async retryPlan() {
+    const old = state.plan;
+    if (!old || state.planRetrying) return;
+    setState({ planRetrying: true }, { focusKey: 'retry-plan' });
+    try {
+      const result = await requestPlan({ type: old.type, messages: state.planFrom === 'chat' ? state.messages : [] });
+      if (state.plan?.id !== old.id) return setState({ planRetrying: false });
+      // id сохраняем: если план уже в сценариях, он там и обновится
+      const fresh = { ...createPlan({ type: old.type, title: result.title, steps: result.steps, source: 'api' }), id: old.id };
+      setState({ planRetrying: false, split: {}, ...commitPlan(fresh) });
+      announce(`План готов: ${fresh.title}`);
+    } catch (error) {
+      if (state.plan?.id !== old.id) return setState({ planRetrying: false });
+      const plan = { ...state.plan, fallbackReason: `${describeError(error)} Попробуй позже.` };
+      setState({ planRetrying: false, ...commitPlan(plan) }, { focusKey: 'retry-plan' });
+      announce('AI всё ещё недоступен, остаётся офлайн-план');
+    }
+  },
+
+  toggleStep(stepId, done) {
+    const before = getProgress(state.plan);
+    const plan = setStepDone(state.plan, stepId, done);
+    setState(commitPlan(plan));
+    afterToggle(before, plan);
+  },
+
+  toggleSubstep(stepId, substepId, done) {
+    const before = getProgress(state.plan);
+    const plan = setSubstepDone(state.plan, stepId, substepId, done);
+    setState(commitPlan(plan));
+    afterToggle(before, plan);
+  },
+
+  async splitStep(stepId) {
+    const plan = state.plan;
+    const step = findStep(plan, stepId);
+    if (!step || state.split[stepId] === 'loading') return;
+    setState({ split: { ...state.split, [stepId]: 'loading' } }, { focusKey: `step-${stepId}` });
+
+    try {
+      const substeps = await requestSplit({ type: plan.type, planTitle: plan.title, step });
+      if (state.plan?.id !== plan.id || !findStep(state.plan, stepId)) return;
+      const next = insertSubsteps(state.plan, stepId, substeps);
+      const inserted = findStep(next, stepId).substeps;
+      const split = { ...state.split };
+      delete split[stepId];
+      setState({ split, newIds: new Set(inserted.map((s) => s.id)), ...commitPlan(next) }, { focusKey: `sub-${inserted[0].id}` });
+      announce(`Добавлено подшагов: ${inserted.length}`);
+    } catch (error) {
+      if (state.plan?.id !== plan.id) return;
+      setState({ split: { ...state.split, [stepId]: { error: `Не получилось разбить шаг. ${describeError(error)}` } } });
+    }
+  },
+
+  savePlan() {
+    const result = storage.addScenario(state.plan);
+    if (result.ok) showToast('Сохранено в «Мои сценарии»', IC.check);
+    else showToast(STORAGE_ERRORS[result.error], IC.info);
+    setState({ scenarios: result.scenarios }, { focusKey: 'save' });
+  },
+
+  openScenario(id) {
+    const plan = state.scenarios.find((s) => s.id === id);
+    if (!plan) return;
+    setState({
+      plan,
+      type: plan.type,
+      planStatus: 'ready',
+      screen: 'plan',
+      planFrom: 'saved',
+      conversation: state.conversation + 1,
+      messages: [],
+      ai: 'idle',
+      split: {},
+    });
+  },
+
+  deleteScenario(id) {
+    const index = state.scenarios.findIndex((s) => s.id === id);
+    const item = state.scenarios[index];
+    if (!item) return;
+    const result = storage.deleteScenario(id);
+    if (!result.ok) {
+      showToast(STORAGE_ERRORS[result.error], IC.info);
+      return render();
+    }
+    // Фокус переходит на соседний сценарий, а если список опустел — на заголовок
+    const next = result.scenarios[Math.min(index, result.scenarios.length - 1)];
+    showToast('Сценарий удалён', IC.trash, 'Вернуть', () => {
+      const restored = storage.restoreScenario(item);
+      clearTimeout(toastTimer);
+      setState({ scenarios: restored.scenarios, toast: null }, { focusKey: `open-${item.id}` });
+    });
+    setState({ scenarios: result.scenarios }, { focusKey: next ? `open-${next.id}` : undefined });
+    if (!next) document.getElementById('saved-title')?.focus();
+  },
+
+  setSetting: (key, value) => setState({ settings: { ...state.settings, [key]: value } }),
+  toggleDataInfo: () => setState({ dataOpen: !state.dataOpen }),
+  askClear: () => setState({ confirmClear: true }),
+
+  openHelp: (reason = 'manual') => setState({ helpOpen: true, helpReason: reason }),
+};
+
+async function reply() {
+  const { type, messages, conversation } = state;
+  setState({ ai: 'typing' });
+  try {
+    const text = await requestReply({ type, messages });
+    if (state.conversation !== conversation) return;
+    setState({ ai: 'idle', messages: [...state.messages, makeMessage('ai', text)] });
+  } catch (error) {
+    if (state.conversation !== conversation) return;
+    setState({ ai: 'error', aiErrorText: chatErrorText(error) });
   }
-
-  renderCounter(els);
-  render();
 }
 
-init();
+function closeHelp() {
+  setState({ helpOpen: false });
+}
+
+function helpBreathe() {
+  setState({ helpOpen: false, screen: 'calm', calmMode: 'breath' });
+}
+
+function clearAll() {
+  storage.clearAll();
+  clearTimeout(doneTimer);
+  clearTimeout(toastTimer);
+  state = { ...baseState(), conversation: state.conversation + 1 };
+  render();
+  announce('Все данные удалены');
+}
+
+// ---------- Отрисовка ----------
+
+const SCREENS = {
+  onb: (ctx) => createOnboarding(ctx, state.onb),
+  home: createHome,
+  calm: createCalm,
+  chat: createChat,
+  plan: createPlanScreen,
+  done: createDone,
+  saved: createSaved,
+  settings: createSettings,
+};
+
+let current = null;
+let currentKey = '';
+let firstRender = true;
+
+function screenKey(s) {
+  if (s.screen === 'onb') return `onb-${s.onb}`;
+  if (s.screen === 'calm') return `calm-${s.calmMode}`;
+  return s.screen;
+}
+
+function applyEnvironment() {
+  const root = document.documentElement;
+  const { theme, fs } = state.settings;
+  if (theme === 'system') delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  root.dataset.reduced = String(isReduced());
+  root.style.setProperty('--fs', String(FONT_SCALE[fs] ?? 1));
+  const dark = theme === 'dark' || (theme === 'system' && darkQuery.matches);
+  els.themeColor?.setAttribute('content', dark ? '#171C21' : '#F3EEE5');
+}
+
+function renderHeader() {
+  const s = state.screen;
+  const button = (path, label, onClick, focus) =>
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, dataset: { focus }, onClick }, icon(path, 22));
+
+  replaceKeepFocus(els.header, [
+    s === 'home' || s === 'onb'
+      ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
+        h('span', { class: 'logo__mark', 'aria-hidden': 'true' }),
+        h('span', { class: 'logo__word' }, 'Паника-режим'))
+      : null,
+    ['chat', 'plan', 'saved', 'settings'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
+    h('div', { class: 'header__spacer' }),
+    s === 'home' ? button(IC.sliders, 'Настройки', actions.openSettings, 'settings') : null,
+    h('button', { class: 'help-btn', type: 'button', dataset: { focus: 'help' }, onClick: () => actions.openHelp('manual') },
+      icon(IC.heart, 18, { strokeWidth: 1.9 }), 'Живая помощь'),
+  ]);
+}
+
+function renderBanner() {
+  const show = !state.online && state.screen !== 'onb';
+  els.banner.hidden = !show;
+  if (show && !els.banner.childElementCount) {
+    els.banner.append(icon(IC.wifiOff, 20), h('span', {}, 'Нет сети. Дыхание и сохранённые планы работают и без неё.'));
+  }
+}
+
+function renderScreen(options = {}) {
+  const key = screenKey(state);
+  const ctx = { state, actions };
+  if (key !== currentKey) {
+    current?.destroy?.();
+    current = SCREENS[state.screen](ctx);
+    currentKey = key;
+    els.stage.replaceChildren(current.el);
+    if (!firstRender && !state.helpOpen) {
+      const target = current.focusTarget ?? current.el.querySelector('h1, h2, [tabindex="-1"]');
+      target?.focus({ preventScroll: true });
+    }
+  }
+  current.update?.({ ...state, reduced: isReduced() }, options);
+}
+
+let layerKey = '';
+let returnFocus = null;
+
+function renderLayers() {
+  const modalKey = state.helpOpen ? `help-${state.helpReason}` : state.confirmClear ? 'confirm' : '';
+  const key = `${modalKey}|${state.toast?.key ?? ''}`;
+  if (key === layerKey) return;
+  const hadModal = Boolean(layerKey.split('|')[0]);
+  const modalChanged = layerKey.split('|')[0] !== modalKey;
+  layerKey = key;
+
+  // Диалог пересоздаётся только при его смене, тост — независимо от диалога
+  let modal = els.layers.querySelector('.dialog, .sheet-overlay');
+  if (modalChanged) {
+    if (modalKey && !hadModal) returnFocus = document.activeElement;
+    modal = state.helpOpen
+      ? createHelpDialog({ crisis: state.helpReason === 'crisis', onClose: closeHelp, onBreathe: helpBreathe })
+      : state.confirmClear
+        ? createConfirmSheet({ onCancel: () => setState({ confirmClear: false }), onConfirm: clearAll })
+        : null;
+  }
+  els.layers.replaceChildren(
+    ...[modal, state.toast ? createToast(state.toast, () => state.toast?.action?.()) : null].filter(Boolean),
+  );
+  // Пока открыт диалог, остальная страница недоступна для фокуса и скринридера
+  els.inner.inert = Boolean(modal);
+
+  if (modalChanged) {
+    if (modal) modal.focusTarget?.focus();
+    else if (hadModal && returnFocus?.isConnected) returnFocus.focus();
+  }
+}
+
+function render(options) {
+  applyEnvironment();
+  renderHeader();
+  renderBanner();
+  renderScreen(options);
+  renderLayers();
+  state.newIds = new Set();
+  firstRender = false;
+}
+
+// ---------- Запуск ----------
+
+window.addEventListener('online', () => setState({ online: true }));
+window.addEventListener('offline', () => setState({ online: false }));
+darkQuery.addEventListener?.('change', () => render());
+motionQuery.addEventListener?.('change', () => render());
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (state.confirmClear) setState({ confirmClear: false });
+  else if (state.helpOpen) closeHelp();
+});
+
+render();
