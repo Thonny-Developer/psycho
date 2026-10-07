@@ -1962,7 +1962,8 @@ textarea::placeholder {
   transition: background .4s;
 }
 
-.radio-seg button[aria-checked="true"] {
+.radio-seg button[aria-checked="true"],
+.radio-seg button[aria-pressed="true"] {
   background: var(--surface);
   box-shadow: var(--seg-shadow);
 }
@@ -2977,4 +2978,212 @@ textarea::placeholder {
   font-size: calc(12px * var(--fs));
   color: var(--text-2);
   white-space: nowrap;
+}
+
+/* ===== Библиотека ===== */
+
+.input--search {
+  border-radius: 999px;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.book-card {
+  display: flex;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--surface);
+  text-align: left;
+  transition: border-color .3s;
+}
+
+.book-card:hover {
+  border-color: var(--accent);
+}
+
+.book-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.book-card__title {
+  font-size: calc(17px * var(--fs));
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.book-card__author {
+  font-size: calc(14px * var(--fs));
+  color: var(--text-2);
+}
+
+.book-card__pitch {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: calc(14px * var(--fs));
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.book-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 2px;
+  font-size: calc(13px * var(--fs));
+  color: var(--text-2);
+}
+
+.book-card__meta .pill {
+  min-height: 24px;
+  padding: 0 10px;
+}
+
+.cover {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px 14px 14px 10px;
+  box-shadow: var(--shadow-1), inset 4px 0 0 rgba(0, 0, 0, .06);
+}
+
+.cover--sm {
+  width: 56px;
+  height: 76px;
+}
+
+.cover--lg {
+  width: 96px;
+  height: 128px;
+  border-radius: 14px 20px 20px 14px;
+}
+
+.cover--stress { background: var(--accent-soft); }
+.cover--procrastination { background: var(--sand); }
+.cover--study { background: var(--surface-2); }
+.cover--self { background: var(--warn-soft); }
+.cover--energy { background: var(--accent-soft-2); }
+
+.cover__circle {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.cover__circle--a {
+  width: 80%;
+  aspect-ratio: 1;
+  right: -25%;
+  top: -15%;
+  background: var(--accent-mute);
+  opacity: .55;
+}
+
+.cover__circle--b {
+  width: 50%;
+  aspect-ratio: 1;
+  left: -12%;
+  bottom: -8%;
+  background: var(--surface);
+  opacity: .7;
+}
+
+.cover__letter {
+  position: relative;
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--accent-ink);
+}
+
+.cover--lg .cover__letter {
+  font-size: 46px;
+}
+
+.book-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.ideas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+  font-size: calc(16px * var(--fs));
+  line-height: 1.5;
+}
+
+.ideas li::marker {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.try-today {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 24px;
+  background: var(--warn-soft);
+}
+
+.try-today__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--warn);
+}
+
+.try-today h2 {
+  color: var(--text);
+  font-size: calc(18px * var(--fs));
+  font-weight: 600;
+}
+
+.radio-seg--status button {
+  font-size: calc(13px * var(--fs));
+}
+
+/* Темы в одну прокручиваемую строку: на узком экране не съедают полэкрана */
+.chips--scroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 2px var(--pad) 6px;
+  scrollbar-width: none;
+  scroll-padding: 0 var(--pad);
+}
+
+.chips--scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.chips--scroll .chip {
+  flex: none;
 }

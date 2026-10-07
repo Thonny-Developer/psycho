@@ -17,12 +17,13 @@ function keysFor(prefix) {
     scenarios: `${prefix}scenarios`,
     outbox: `${prefix}outbox`, // изменения, которые ещё не дошли до сервера
     streak: `${prefix}streak`, // журнал активности и засчитанные дни
+    books: `${prefix}books`, // статусы книг { bookId: 'want' | 'reading' | 'done' }
     legacyCurrent: prefix === PREFIX ? `${PREFIX}current` : null, // текущий план из первой версии
   };
 }
 
 export const MAX_SCENARIOS = 50;
-export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile', 'streak'];
+export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile', 'streak', 'library'];
 const RENAMED_SCREENS = { settings: 'profile' }; // экраны, переименованные в новых версиях
 
 export const DEFAULT_SETTINGS = { theme: 'system', fs: 'm', reduce: null };
@@ -176,6 +177,21 @@ export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = 
 
     saveStreak(streak) {
       return write(KEYS.streak, streak);
+    },
+
+    loadBookStatuses() {
+      const raw = read(KEYS.books, {});
+      const result = {};
+      if (raw && typeof raw === 'object') {
+        for (const [id, status] of Object.entries(raw)) {
+          if (/^[a-z0-9-]{3,60}$/.test(id) && ['want', 'reading', 'done'].includes(status)) result[id] = status;
+        }
+      }
+      return result;
+    },
+
+    saveBookStatuses(statuses) {
+      return write(KEYS.books, statuses);
     },
 
     /** Полная замена списка сценариев данными с сервера. */

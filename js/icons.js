@@ -34,4 +34,5 @@ export const IC = {
   sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 3v1.5M12 19.5V21M4.6 4.6l1 1M18.4 18.4l1 1M3 12h1.5M19.5 12H21M4.6 19.4l1-1M18.4 5.6l1-1',
   chevronLeft: 'M15 18l-6-6 6-6',
   chevronRight: 'M9 6l6 6-6 6',
+  book: 'M4 5a2 2 0 0 1 2-2h12v15H6a2 2 0 0 0-2 2V5zM4 20a2 2 0 0 0 2 2h12v-4M8 7h6',
 };

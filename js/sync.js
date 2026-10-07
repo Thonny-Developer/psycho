@@ -42,7 +42,7 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
     flushing = true;
     try {
       for (const [id, row] of Object.entries(storage.loadOutbox())) {
-        const { error } = await client.from('plans').upsert(row, { onConflict: 'user_id,id' });
+        const { error } = await send(client, row);
         if (error) {
           if (isAuthError(error)) {
             onExpired();
@@ -65,6 +65,15 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
       flushing = false;
       onChange();
     }
+  }
+
+  /** Одна запись очереди → запрос. Статусы книг лежат в очереди с ключом book:<id>. */
+  function send(client, row) {
+    if (row._table === 'book_status') {
+      if (!row.status) return client.from('book_status').delete().eq('book_id', row.book_id);
+      return client.from('book_status').upsert({ user_id: userId, book_id: row.book_id, status: row.status }, { onConflict: 'user_id,book_id' });
+    }
+    return client.from('plans').upsert(row, { onConflict: 'user_id,id' });
   }
 
   return {
@@ -100,6 +109,12 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
       // Неотправленные локальные правки важнее серверной версии
       const outbox = storage.loadOutbox();
       const all = data.map((row) => rowToPlan(outbox[row.id] ? { ...row, ...outbox[row.id] } : row)).filter(Boolean);
+      // Новые планы, которые ещё в очереди и на сервер не дошли
+      for (const row of Object.values(outbox)) {
+        if (row._table || data.some((r) => r.id === row.id)) continue;
+        const plan = rowToPlan({ created_at: new Date().toISOString(), ...row });
+        if (plan) all.push(plan);
+      }
       const scenarios = all.filter((p) => p.savedAt).sort((a, b) => b.savedAt - a.savedAt);
       return { scenarios, all };
     },
@@ -114,6 +129,29 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
         return null;
       }
       return data.map((r) => r.day);
+    },
+
+    /** Статус книги; null — снять отметку. */
+    setBookStatus(bookId, status) {
+      queue({ id: `book:${bookId}`, _table: 'book_status', book_id: bookId, status: status ?? null });
+    },
+
+    /** Статусы книг с сервера с учётом неотправленных изменений, или null без связи. */
+    async pullBookStatuses() {
+      const client = await getClient();
+      if (!client) return null;
+      const { data, error } = await client.from('book_status').select('book_id, status');
+      if (error) {
+        if (isAuthError(error)) onExpired();
+        return null;
+      }
+      const result = Object.fromEntries(data.map((r) => [r.book_id, r.status]));
+      for (const row of Object.values(storage.loadOutbox())) {
+        if (row._table !== 'book_status') continue;
+        if (row.status) result[row.book_id] = row.status;
+        else delete result[row.book_id];
+      }
+      return result;
     },
 
     /** Перенос гостевых планов: существующие строки не трогаем, дублей нет. */

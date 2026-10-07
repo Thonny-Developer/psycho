@@ -53,6 +53,8 @@ import {
 import { computeStats, uniquePlans, buildExport, exportFileName } from './stats.js';
 import { dayKey, recordActivity, withCompletion, evaluateDay, syncToday, computeStreak, weekView } from './streak.js';
 import { createStreakScreen } from './screens/streak.js';
+import { createLibrary, createBook } from './screens/library.js';
+import { parseLibrary, isStatus } from './library.js';
 
 // У гостя и у каждого аккаунта своё пространство в localStorage, чтобы данные не смешивались.
 // Сохранённая сессия Supabase читается сразу, чтобы после перезагрузки не мелькали данные гостя.
@@ -123,6 +125,11 @@ function baseState() {
     serverDays: [], // засчитанные дни аккаунта с сервера
     streakMonth: null, // месяц календаря на экране серии, 'YYYY-MM'
     streakReturn: 'home',
+    library: { status: 'idle', books: null },
+    libraryQuery: '',
+    libraryTopic: null,
+    bookId: null,
+    bookStatuses: {},
   };
 }
 
@@ -134,6 +141,7 @@ function initialState() {
   if (restoredUser) state.account = { ...state.account, user: restoredUser };
   state.firstSeenAt ??= Date.now();
   state.streakLocal = storage.loadStreak();
+  state.bookStatuses = storage.loadBookStatuses();
 
   if (session) {
     Object.assign(state, session);
@@ -173,7 +181,7 @@ function persist() {
     reminderTime: state.reminderTime,
     firstSeenAt: state.firstSeenAt,
   });
-  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done', 'streak'];
+  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done', 'streak', 'library'];
   storage.saveSession({
     screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
     type: state.type,
@@ -271,6 +279,7 @@ const actions = {
   goBack() {
     if (state.screen === 'profile-edit') return setState({ screen: 'profile' });
     if (state.screen === 'streak') return setState({ screen: state.streakReturn ?? 'home' });
+    if (state.screen === 'book') return setState({ screen: 'library' });
     if (state.screen === 'plan') {
       return setState({ screen: state.planFrom === 'saved' ? 'saved' : state.messages.length ? 'chat' : 'home' });
     }
@@ -416,6 +425,42 @@ const actions = {
     const tracked = trackPlan(setSubstepDone(state.plan, stepId, substepId, done));
     setState({ ...commitPlan(tracked.plan), streakLocal: tracked.streakLocal });
     afterToggle(before, tracked.plan);
+  },
+
+  openLibrary() {
+    setState({ screen: 'library' });
+    if (state.library.status !== 'ready') actions.loadLibrary();
+  },
+
+  async loadLibrary() {
+    if (state.library.status === 'loading') return;
+    setState({ library: { ...state.library, status: 'loading' } });
+    try {
+      const res = await fetch('data/books.json', { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(String(res.status));
+      const books = parseLibrary(await res.json());
+      setState({ library: { status: 'ready', books } });
+    } catch {
+      setState({ library: { status: 'error', books: null } });
+    }
+  },
+
+  // Фильтр живёт в экране, в состоянии — чтобы пережить переход в книгу и обратно
+  setLibraryFilter({ query, topic }) {
+    state = { ...state, libraryQuery: query, libraryTopic: topic };
+  },
+
+  openBook: (id) => setState({ screen: 'book', bookId: id }),
+
+  setBookStatus(bookId, status) {
+    if (status !== null && !isStatus(status)) return;
+    const bookStatuses = { ...state.bookStatuses };
+    if (status) bookStatuses[bookId] = status;
+    else delete bookStatuses[bookId];
+    storage.saveBookStatuses(bookStatuses);
+    sync?.setBookStatus(bookId, status);
+    setState({ bookStatuses }, { focusKey: status ? `status-${status}` : undefined });
+    announce(status ? 'Отметка сохранена' : 'Отметка снята');
   },
 
   openStreak: () => setState({ screen: 'streak', streakReturn: state.screen === 'streak' ? state.streakReturn : state.screen, streakMonth: null }),
@@ -741,6 +786,7 @@ function dataFromStorage() {
     scenarios: storage.listScenarios(),
     streakLocal: storage.loadStreak(),
     serverDays: [],
+    bookStatuses: storage.loadBookStatuses(),
     messages: session?.messages ?? [],
     type: session?.type ?? null,
     plan: session?.plan ?? null,
@@ -794,7 +840,14 @@ async function refreshFromServer() {
   if (!pulled) return;
   storage.replaceScenarios(pulled.scenarios);
   const serverDays = await sync?.pullStreak();
-  setState({ scenarios: storage.listScenarios(), serverPlans: pulled.all, ...(serverDays ? { serverDays } : {}) });
+  const statuses = await sync?.pullBookStatuses();
+  if (statuses) storage.saveBookStatuses(statuses);
+  setState({
+    scenarios: storage.listScenarios(),
+    serverPlans: pulled.all,
+    ...(serverDays ? { serverDays } : {}),
+    ...(statuses ? { bookStatuses: statuses } : {}),
+  });
 }
 
 async function loadProfile(userId) {
@@ -893,6 +946,8 @@ const SCREENS = {
   profile: createProfile,
   'profile-edit': createProfileEdit,
   streak: createStreakScreen,
+  library: createLibrary,
+  book: createBook,
   auth: createAuth,
 };
 
@@ -900,6 +955,7 @@ const SCREENS = {
 const TABS = [
   { screen: 'home', label: 'Главная', icon: IC.home },
   { screen: 'saved', label: 'Планы', icon: IC.bookmark },
+  { screen: 'library', label: 'Книги', icon: IC.book },
   { screen: 'profile', label: 'Профиль', icon: IC.user },
 ];
 
@@ -936,7 +992,7 @@ function renderHeader() {
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
         h('span', { class: 'logo__word' }, 'Паника-режим'))
       : null,
-    ['chat', 'plan', 'profile-edit', 'streak'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['chat', 'plan', 'profile-edit', 'streak', 'book'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
     s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
     h('div', { class: 'header__spacer' }),
@@ -953,7 +1009,7 @@ function renderTabbar() {
     type: 'button',
     'aria-current': t.screen === state.screen ? 'page' : null,
     dataset: { focus: `tab-${t.screen}` },
-    onClick: () => setState({ screen: t.screen }),
+    onClick: () => (t.screen === 'library' ? actions.openLibrary() : setState({ screen: t.screen })),
   }, icon(t.icon, 22), h('span', {}, t.label))));
 }
 
@@ -1107,3 +1163,4 @@ document.addEventListener('keydown', (event) => {
 
 render();
 initAccounts();
+if (state.screen === 'library') actions.loadLibrary();
