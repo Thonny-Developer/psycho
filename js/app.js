@@ -1090,7 +1090,7 @@ function renderHeader() {
   const s = state.screen;
   const tab = TABS.some((t) => t.screen === s);
   const button = (path, label, onClick, focus) =>
-    h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, dataset: { focus }, onClick }, icon(path, 22));
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, title: label, dataset: { focus }, onClick }, icon(path, 22));
 
   replaceKeepFocus(els.header, [
     tab || s === 'onb'
@@ -1105,6 +1105,8 @@ function renderHeader() {
     s === 'auth' && isSignedIn() ? button(IC.close, 'Закрыть', actions.closeAuth, 'close') : null,
     s === 'auth' && !isSignedIn() && state.auth.mode !== 'welcome' ? button(IC.back, 'Назад', actions.closeAuth, 'back') : null,
     h('div', { class: 'header__spacer' }),
+    // В профиле выход виден сразу, без прокрутки до конца страницы
+    s === 'profile' && isSignedIn() ? button(IC.logout, 'Выйти из аккаунта', actions.signOut, 'header-logout') : null,
     h('button', { class: 'help-btn', type: 'button', dataset: { focus: 'help' }, onClick: () => actions.openHelp('manual') },
       icon(IC.heart, 18, { strokeWidth: 1.9 }), 'Живая помощь'),
   ]);

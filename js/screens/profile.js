@@ -95,14 +95,7 @@ function accountCard(state, actions) {
     h('p', { class: 'sync-note text-14 muted', role: 'status' }, icon(syncIcon, 16, { strokeWidth: 1.9 }), syncText),
     account.expired
       ? h('button', { class: 'btn btn--md', type: 'button', dataset: { focus: 'acc-login' }, onClick: () => actions.openAuth('login') }, 'Войти снова')
-      : h('button', {
-        class: 'btn btn--soft btn--wide',
-        type: 'button',
-        disabled: account.signingOut,
-        'aria-busy': String(account.signingOut),
-        dataset: { focus: 'acc-logout' },
-        onClick: actions.signOut,
-      }, h('span', { class: 'btn__spinner', 'aria-hidden': 'true' }), icon(IC.logout, 18), account.signingOut ? 'Выхожу…' : 'Выйти'));
+      : null);
 }
 
 function reminderSetting(state, actions) {
@@ -220,6 +213,17 @@ export function createProfile({ actions }) {
           },
           h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.download, 18, { strokeWidth: 1.9 })),
           h('span', {}, state.exporting ? 'Собираю файл…' : 'Скачать мои данные')),
+          h('div', { class: 'list-card__sep' }),
+          h('button', {
+            class: 'list-card__btn',
+            type: 'button',
+            disabled: state.account.signingOut,
+            'aria-busy': String(state.account.signingOut),
+            dataset: { focus: 'logout' },
+            onClick: actions.signOut,
+          },
+          h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.logout, 18, { strokeWidth: 1.9 })),
+          h('span', {}, state.account.signingOut ? 'Выхожу…' : 'Выйти из аккаунта')),
           h('div', { class: 'list-card__sep' }),
           h('button', { class: 'list-card__btn list-card__btn--warn', type: 'button', dataset: { focus: 'delete-account' }, onClick: actions.askDeleteAccount },
             h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.trash, 18, { strokeWidth: 1.9 })),
