@@ -26,6 +26,11 @@ export function getElements() {
     congrats: $('congrats'),
     saveBtn: $('save-btn'),
     saveError: $('save-error'),
+    savedCount: $('saved-count'),
+    savedTitle: $('saved-title'),
+    savedList: $('saved-list'),
+    savedEmpty: $('saved-empty'),
+    savedError: $('saved-error'),
   };
 }
 
@@ -231,6 +236,73 @@ export function renderPlan(els, state, { focusKey } = {}) {
 
   if (activeKey) {
     const target = els.viewPlan.querySelector(`[data-focus="${CSS.escape(activeKey)}"]`);
+    target?.focus({ preventScroll: true });
+  }
+}
+
+const dateFormat = new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'short' });
+
+function renderSavedItem(scenario, state) {
+  const progress = getProgress(scenario);
+  const typeLabel = PROBLEM_TYPES[scenario.type];
+  const title = scenario.description || typeLabel;
+  const meta = [
+    scenario.description ? typeLabel : null,
+    `${progress.done} из ${progress.total}`,
+    scenario.savedAt ? dateFormat.format(scenario.savedAt) : null,
+  ].filter(Boolean).join(' · ');
+
+  const confirming = state.pendingDelete === scenario.id;
+  const isCurrent = state.view === 'plan' && state.plan?.id === scenario.id;
+
+  return h(
+    'li',
+    { class: `saved-item${isCurrent ? ' is-current' : ''}` },
+    h(
+      'div',
+      { class: 'saved-item__main' },
+      h('span', { class: 'saved-item__title', title }, title),
+      h('span', { class: 'saved-item__meta' }, meta, isCurrent ? ' · открыт сейчас' : ''),
+    ),
+    h(
+      'div',
+      { class: 'saved-item__actions' },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'link-btn',
+          'aria-label': `Открыть: ${title}`,
+          dataset: { action: 'open-scenario', id: scenario.id, focus: `open-${scenario.id}` },
+        },
+        'Открыть',
+      ),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'link-btn link-btn--danger',
+          'aria-label': confirming ? `Подтвердить удаление: ${title}` : `Удалить: ${title}`,
+          dataset: { action: 'delete-scenario', id: scenario.id, focus: `delete-${scenario.id}` },
+        },
+        confirming ? 'Точно удалить?' : 'Удалить',
+      ),
+    ),
+  );
+}
+
+export function renderSaved(els, state, { focusKey } = {}) {
+  const activeKey = focusKey ?? document.activeElement?.dataset?.focus;
+  const count = state.scenarios.length;
+
+  els.savedCount.hidden = count === 0;
+  els.savedCount.textContent = String(count);
+  els.savedList.replaceChildren(...state.scenarios.map((s) => renderSavedItem(s, state)));
+  els.savedEmpty.hidden = count > 0;
+  fillError(els.savedError, state.savedError);
+
+  if (activeKey) {
+    const target = els.savedList.querySelector(`[data-focus="${CSS.escape(activeKey)}"]`);
     target?.focus({ preventScroll: true });
   }
 }

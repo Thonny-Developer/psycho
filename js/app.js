@@ -10,9 +10,19 @@ import {
 } from './plan.js';
 import { getFallbackSteps } from './fallback.js';
 import { requestSteps } from './api.js';
-import { getElements, renderForm, renderPlan, renderView, renderCounter, announce } from './render.js';
+import { createStorage, MAX_SCENARIOS } from './storage.js';
+import {
+  getElements,
+  renderForm,
+  renderPlan,
+  renderSaved,
+  renderView,
+  renderCounter,
+  announce,
+} from './render.js';
 
 const els = getElements();
+const storage = createStorage();
 
 const state = {
   view: 'form',
@@ -25,13 +35,41 @@ const state = {
   breakdown: {}, // stepId -> { loading: true } | { error: 'текст' }
   newIds: new Set(), // элементы, которые нужно один раз анимировать при появлении
   scenarios: [],
+  savedError: null,
+  pendingDelete: null, // id сценария, для которого ждём подтверждения удаления
 };
+
+let pendingDeleteTimer = null;
 
 function render(options) {
   renderView(els, state);
   renderForm(els, state);
   renderPlan(els, state, options);
+  renderSaved(els, state, options);
   state.newIds.clear();
+}
+
+const STORAGE_ERRORS = {
+  quota: 'В браузере закончилось место для сохранений. Удали старые сценарии.',
+  unavailable: 'Браузер не даёт сохранять данные, например в приватном режиме.',
+  limit: `Можно сохранить до ${MAX_SCENARIOS} сценариев. Удали ненужные, чтобы добавить новый.`,
+};
+
+/**
+ * Сохраняет текущий план, чтобы он пережил перезагрузку,
+ * и синхронизирует его с сохранённым сценарием, если он там есть.
+ */
+function persistPlan() {
+  const current = storage.saveCurrent(state.plan);
+  let synced = { ok: true };
+  if (state.plan) {
+    synced = storage.updateScenario(state.plan);
+    state.scenarios = synced.scenarios;
+  }
+  const error = !current.ok ? current.error : !synced.ok ? synced.error : null;
+  state.saveError = error
+    ? { message: `Прогресс не сохранится после перезагрузки. ${STORAGE_ERRORS[error]}` }
+    : null;
 }
 
 function selectedType() {
@@ -57,8 +95,8 @@ function showPlan(plan, { reason = null } = {}) {
   state.view = 'plan';
   state.fallbackReason = reason;
   state.breakdown = {};
-  state.saveError = null;
   state.newIds = new Set(plan.steps.map((s) => s.id));
+  persistPlan();
   render();
   els.planTitle.focus({ preventScroll: true });
   window.scrollTo({ top: 0 });
@@ -144,6 +182,7 @@ async function breakdownStep(stepId) {
 
     delete state.breakdown[stepId];
     state.plan = insertSubsteps(state.plan, stepId, substeps);
+    persistPlan();
     const inserted = findStep(state.plan, stepId).substeps;
     inserted.forEach((sub) => state.newIds.add(sub.id));
     render({ focusKey: `check-${inserted[0].id}` });
@@ -159,6 +198,7 @@ async function breakdownStep(stepId) {
 function updatePlan(plan) {
   const before = getProgress(state.plan);
   state.plan = plan;
+  persistPlan();
   render();
 
   const after = getProgress(plan);
@@ -180,13 +220,81 @@ function onPlanClick(event) {
 
   if (action === 'breakdown') breakdownStep(stepId);
   if (action === 'retry-plan') retryPlan();
+  if (action === 'save') saveScenario();
   if (action === 'new-plan') {
     state.view = 'form';
     state.plan = null;
     state.breakdown = {};
+    persistPlan();
     render();
     els.form.querySelector('input[name="type"]:checked, input[name="type"]').focus();
   }
+}
+
+function saveScenario() {
+  if (!state.plan || state.scenarios.some((s) => s.id === state.plan.id)) return;
+  const result = storage.addScenario(state.plan);
+  state.scenarios = result.scenarios;
+  state.saveError = result.ok
+    ? null
+    : { message: STORAGE_ERRORS[result.error], retryAction: result.error === 'limit' ? null : 'save' };
+  render({ focusKey: 'save' });
+  if (result.ok) announce(els, 'Сценарий сохранён');
+}
+
+function openScenario(id) {
+  const scenario = state.scenarios.find((s) => s.id === id);
+  if (!scenario) return;
+  state.plan = scenario;
+  state.view = 'plan';
+  state.fallbackReason = null;
+  state.breakdown = {};
+  state.saveError = null;
+  persistPlan();
+  render();
+  els.planTitle.focus({ preventScroll: true });
+  window.scrollTo({ top: 0 });
+  announce(els, 'Сценарий открыт');
+}
+
+function resetPendingDelete() {
+  clearTimeout(pendingDeleteTimer);
+  if (state.pendingDelete) {
+    state.pendingDelete = null;
+    renderSaved(els, state);
+  }
+}
+
+/** Удаление в два нажатия: первое спрашивает «Точно удалить?», второе удаляет. */
+function deleteScenario(id) {
+  if (state.pendingDelete !== id) {
+    clearTimeout(pendingDeleteTimer);
+    state.pendingDelete = id;
+    renderSaved(els, state);
+    pendingDeleteTimer = setTimeout(resetPendingDelete, 4000);
+    return;
+  }
+
+  clearTimeout(pendingDeleteTimer);
+  state.pendingDelete = null;
+  const index = state.scenarios.findIndex((s) => s.id === id);
+  const result = storage.deleteScenario(id);
+  state.scenarios = result.scenarios;
+  state.savedError = result.ok ? null : { message: STORAGE_ERRORS[result.error] };
+
+  // Фокус на соседний сценарий, а если список опустел, то на заголовок раздела
+  const next = state.scenarios[Math.min(index, state.scenarios.length - 1)];
+  render({ focusKey: next ? `open-${next.id}` : undefined });
+  if (!next) els.savedTitle.focus();
+  if (result.ok) announce(els, 'Сценарий удалён');
+}
+
+function onSavedClick(event) {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const { action, id } = button.dataset;
+  if (action === 'open-scenario') openScenario(id);
+  if (action === 'delete-scenario') deleteScenario(id);
 }
 
 function init() {
@@ -203,6 +311,14 @@ function init() {
   els.description.addEventListener('input', () => renderCounter(els));
   els.viewPlan.addEventListener('change', onPlanChange);
   els.viewPlan.addEventListener('click', onPlanClick);
+  els.savedList.addEventListener('click', onSavedClick);
+
+  state.scenarios = storage.listScenarios();
+  const current = storage.loadCurrent();
+  if (current) {
+    state.plan = current;
+    state.view = 'plan';
+  }
 
   renderCounter(els);
   render();
