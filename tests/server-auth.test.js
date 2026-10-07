@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { bearerToken, getUser, supabaseConfig, createRateLimiter } from '../api/_lib/auth.js';
+import { bearerToken, getUser, supabaseConfig, createRateLimiter, appUrl } from '../api/_lib/auth.js';
 import configHandler from '../api/config.js';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.payload-part-long-enough.signature';
@@ -69,7 +69,11 @@ test('лимит для аккаунта и гостя считается отд
 test('/api/config отдаёт только публичные настройки', () => {
   const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(d) { this.data = d; return this; } };
   configHandler({ method: 'GET' }, res);
-  assert.deepEqual(res.data, { accounts: true, supabaseUrl: 'https://demo.supabase.co', supabaseAnonKey: 'public-anon-key' });
+  assert.deepEqual(res.data, { accounts: true, supabaseUrl: 'https://demo.supabase.co', supabaseAnonKey: 'public-anon-key', siteUrl: null });
+  process.env.APP_URL = 'https://panika.example.kz/';
+  configHandler({ method: 'GET' }, res);
+  assert.equal(res.data.siteUrl, 'https://panika.example.kz');
+  delete process.env.APP_URL;
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'super-secret';
   configHandler({ method: 'GET' }, res);
   assert.ok(!JSON.stringify(res.data).includes('super-secret'));
@@ -79,4 +83,29 @@ test('/api/config отдаёт только публичные настройк�
   assert.deepEqual(res.data, { accounts: false });
   configHandler({ method: 'POST' }, res);
   assert.equal(res.code, 405);
+});
+
+test('appUrl: домен для ссылок из писем', () => {
+  const keep = { app: process.env.APP_URL, vercel: process.env.VERCEL_PROJECT_PRODUCTION_URL };
+  delete process.env.APP_URL;
+  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  assert.equal(appUrl(), null, 'не задан — клиент возьмёт текущий адрес');
+
+  process.env.VERCEL_PROJECT_PRODUCTION_URL = 'panika.vercel.app';
+  assert.equal(appUrl(), 'https://panika.vercel.app', 'на Vercel по умолчанию домен продакшена');
+
+  process.env.APP_URL = ' https://panika.kz/some/path ';
+  assert.equal(appUrl(), 'https://panika.kz', 'APP_URL важнее, берётся только origin');
+
+  process.env.APP_URL = 'http://localhost:3000';
+  assert.equal(appUrl(), 'http://localhost:3000', 'http можно только локально');
+  process.env.APP_URL = 'http://panika.kz';
+  assert.equal(appUrl(), null, 'http на настоящем домене не принимается');
+  process.env.APP_URL = 'javascript:alert(1)';
+  assert.equal(appUrl(), null);
+
+  for (const [k, v] of [['APP_URL', keep.app], ['VERCEL_PROJECT_PRODUCTION_URL', keep.vercel]]) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 });

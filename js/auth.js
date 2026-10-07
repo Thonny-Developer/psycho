@@ -38,6 +38,23 @@ export function hasAuthRedirect() {
   return url.searchParams.has('code') || url.searchParams.has('error_description') || url.hash.includes('access_token');
 }
 
+/**
+ * Ошибка из ссылки письма: Supabase возвращает её в адресе (#error_code=otp_expired…).
+ * Возвращает понятный текст и убирает параметры из адреса.
+ */
+export function takeAuthRedirectError() {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams(url.hash.replace(/^#/, ''));
+  for (const [k, v] of url.searchParams) if (!params.has(k)) params.set(k, v);
+  if (!params.has('error') && !params.has('error_code')) return null;
+
+  history.replaceState(null, '', url.pathname);
+  const code = params.get('error_code');
+  if (code === 'otp_expired') return 'Ссылка из письма устарела или уже использована. Запроси новую — это займёт минуту.';
+  if (params.get('error') === 'access_denied') return 'Вход отменён. Можно попробовать ещё раз.';
+  return 'Ссылка не сработала. Это не ты — попробуй войти или запроси новое письмо.';
+}
+
 /** Настройки с сервера; без сети — последние известные. */
 export function loadConfig() {
   configPromise ??= (async () => {
@@ -78,7 +95,10 @@ export function getClient() {
     if (!window.supabase) await loadScript('js/vendor/supabase.js');
     return window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
       auth: {
-        flowType: 'pkce',
+        // implicit, а не pkce: ссылку из письма часто открывают в другом браузере
+        // (встроенном в почтовое приложение или на телефоне). При pkce ключ обмена остался бы
+        // в браузере, где регистрировались, и подтверждение не завершилось бы.
+        flowType: 'implicit',
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
@@ -94,7 +114,7 @@ export function getClient() {
 
 async function run(fn) {
   const client = await getClient();
-  if (!client) return { ok: false, error: 'Аккаунты сейчас недоступны. Можно продолжить без входа — всё работает.' };
+  if (!client) return { ok: false, error: 'Вход сейчас недоступен. Это не ты — попробуй чуть позже.' };
   try {
     const { data, error } = await fn(client);
     if (error) return { ok: false, error: authErrorMessage(error), code: error.code };
@@ -104,21 +124,28 @@ async function run(fn) {
   }
 }
 
-const home = () => `${window.location.origin}/`;
+/**
+ * Куда ведут ссылки из писем и возврат после Google: домен из APP_URL на сервере,
+ * а если он не задан — текущий адрес. Supabase примет его, только если адрес есть в Redirect URLs.
+ */
+async function home() {
+  const { siteUrl } = await loadConfig();
+  return `${siteUrl || window.location.origin}/`;
+}
 
-export const signUp = ({ email, password, name }) => run((c) => c.auth.signUp({
+export const signUp = ({ email, password, name }) => run(async (c) => c.auth.signUp({
   email,
   password,
-  options: { data: { name, timezone: currentTimezone() }, emailRedirectTo: home() },
+  options: { data: { name, timezone: currentTimezone() }, emailRedirectTo: await home() },
 }));
 
 export const signIn = ({ email, password }) => run((c) => c.auth.signInWithPassword({ email, password }));
 
 /** Уводит на страницу Google и обратно; сессию подхватит detectSessionInUrl. */
-export const signInWithGoogle = () => run((c) => c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: home() } }));
+export const signInWithGoogle = () => run(async (c) => c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: await home() } }));
 
 /** Supabase отвечает одинаково для существующей и несуществующей почты — так и должно быть. */
-export const resetPassword = (email) => run((c) => c.auth.resetPasswordForEmail(email, { redirectTo: home() }));
+export const resetPassword = (email) => run(async (c) => c.auth.resetPasswordForEmail(email, { redirectTo: await home() }));
 
 export const updatePassword = (password) => run((c) => c.auth.updateUser({ password }));
 

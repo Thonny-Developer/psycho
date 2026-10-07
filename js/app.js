@@ -15,6 +15,7 @@ import {
   loadConfig,
   peekSessionUser,
   hasAuthRedirect,
+  takeAuthRedirectError,
   onAuthChange,
   getAccessToken,
   signIn,
@@ -1012,6 +1013,11 @@ setUnauthorizedHandler(() => {
 });
 
 async function initAccounts() {
+  // Ссылка из письма не сработала (устарела, уже использована) — объясняем на экране входа
+  const redirectError = takeAuthRedirectError();
+  if (redirectError && !isSignedIn()) {
+    setState({ screen: 'auth', auth: { ...baseState().auth, mode: 'login', errors: { form: redirectError } } });
+  }
   const config = await loadConfig();
   setState({ account: { ...state.account, enabled: Boolean(config.accounts) } });
   if (config.accounts && (restoredUser || hasAuthRedirect())) listenAuth();

@@ -18,6 +18,25 @@ export function supabaseConfig() {
   return { url: url.replace(/\/$/, ''), anonKey };
 }
 
+/**
+ * Публичный адрес приложения: на него ведут ссылки из писем (подтверждение, сброс пароля)
+ * и возврат после входа через Google. APP_URL задаётся вручную; если его нет, на Vercel
+ * берётся домен продакшена. http допустим только для локальной разработки.
+ */
+export function appUrl() {
+  const fromVercel = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : '';
+  const raw = (process.env.APP_URL || fromVercel).trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function bearerToken(req) {
   const header = req.headers?.authorization ?? '';
   const match = /^Bearer\s+([A-Za-z0-9._-]{20,4096})$/.exec(header);

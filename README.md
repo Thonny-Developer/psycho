@@ -60,6 +60,7 @@ npm test
 | `MISTRAL_API_KEY` | `api/plan.js`, вызов Mistral | да, иначе AI отвечает ошибкой и показывается офлайн-план |
 | `MISTRAL_MODEL` | `api/plan.js` | нет, по умолчанию `ministral-14b-latest` |
 | `SUPABASE_URL` | `api/config.js`, `api/_lib/auth.js` | для аккаунтов |
+| `APP_URL` | `api/config.js`: адрес для ссылок из писем и возврата после Google | желательно; без него — домен продакшена Vercel |
 | `SUPABASE_PUBLISHABLE_KEY` (или `SUPABASE_ANON_KEY`) | отдаётся браузеру через `api/config.js`, публичный | для аккаунтов |
 | `SUPABASE_SECRET_KEY` (или `SUPABASE_SERVICE_ROLE_KEY`) | только `api/account.js`, удаление аккаунта | для удаления аккаунта |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SENDER_EMAIL`, `SMTP_SENDER_NAME` | не в коде: значения для Supabase → SMTP Settings (см. «Почта (SMTP)») | для настоящего запуска, в Vercel не нужны |
@@ -76,11 +77,12 @@ npm test
 
 1. Создай проект на [supabase.com](https://supabase.com).
 2. Примени миграции из `supabase/migrations/` по порядку: в панели SQL Editor вставь и выполни каждый файл, либо через CLI `supabase link` и `supabase db push`.
-3. Authentication → URL Configuration: в Site URL адрес продакшена, в Redirect URLs он же и `http://localhost:3000/` для `vercel dev`.
-4. Authentication → Providers → Email: включено. Подтверждение почты можно оставить: после регистрации приложение покажет экран «Проверь почту».
-5. Вход через Google: в Google Cloud Console создай OAuth Client (Web), в Authorized redirect URIs добавь `https://<project>.supabase.co/auth/v1/callback`. Client ID и Secret вставь в Supabase → Providers → Google.
-6. В Vercel → Settings → Environment Variables добавь `SUPABASE_URL` (Project Settings → Data API) и `SUPABASE_PUBLISHABLE_KEY` (Project Settings → API Keys, `sb_publishable_…`). Этот ключ публичный по замыслу: данные защищают политики RLS. Для удаления аккаунта нужен ещё `SUPABASE_SECRET_KEY` (`sb_secret_…`): он используется только в `api/account.js` и в браузер не попадает никогда. Старые имена `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY` с legacy-ключами (`eyJ…`) тоже работают.
-7. Проверить политики и триггеры: `psql "<строка подключения>" -v ON_ERROR_STOP=1 -f supabase/tests/<файл>.sql` для `rls_test.sql`, `streak_test.sql` и `content_test.sql`. Скрипты работают в транзакции и всё откатывают.
+3. Задай в Vercel переменную `APP_URL` — публичный адрес приложения, например `https://panika.vercel.app` (без слеша в конце). Если её нет, берётся домен продакшена Vercel. На этот адрес ведут ссылки из писем и возврат после входа через Google.
+4. Authentication → URL Configuration в Supabase: в **Site URL** тот же адрес, что в `APP_URL`, в **Redirect URLs** — `https://<твой домен>/**` и `http://localhost:3000/**` для `vercel dev`. Это обязательно: адрес из запроса Supabase принимает, только если он есть в Redirect URLs, а иначе подставляет Site URL. По умолчанию это `http://localhost:3000`, поэтому без этой настройки письма и ведут на localhost.
+5. Authentication → Providers → Email: включено. Подтверждение почты можно оставить: после регистрации приложение покажет экран «Проверь почту».
+6. Вход через Google: в Google Cloud Console создай OAuth Client (Web), в Authorized redirect URIs добавь `https://<project>.supabase.co/auth/v1/callback`. Client ID и Secret вставь в Supabase → Providers → Google.
+7. В Vercel → Settings → Environment Variables добавь `SUPABASE_URL` (Project Settings → Data API) и `SUPABASE_PUBLISHABLE_KEY` (Project Settings → API Keys, `sb_publishable_…`). Этот ключ публичный по замыслу: данные защищают политики RLS. Для удаления аккаунта нужен ещё `SUPABASE_SECRET_KEY` (`sb_secret_…`): он используется только в `api/account.js` и в браузер не попадает никогда. Старые имена `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY` с legacy-ключами (`eyJ…`) тоже работают.
+8. Проверить политики и триггеры: `psql "<строка подключения>" -v ON_ERROR_STOP=1 -f supabase/tests/<файл>.sql` для `rls_test.sql`, `streak_test.sql` и `content_test.sql`. Скрипты работают в транзакции и всё откатывают.
 
 ### Почта (SMTP)
 
@@ -115,6 +117,7 @@ npm test
 ### Как устроено в приложении
 
 - `js/auth.js` лениво загружает `js/vendor/supabase.js` (своя копия библиотеки, без CDN) и оборачивает вход, регистрацию, Google, сброс пароля и выход.
+- Ссылки из писем строятся от `APP_URL`. Вход по ссылке работает на implicit-потоке Supabase: письмо часто открывают в другом браузере (встроенном в почтовое приложение или на телефоне), а при PKCE ключ обмена остался бы там, где регистрировались, и подтверждение не завершилось бы. Если ссылка устарела или уже использована, на экране входа появляется понятное сообщение.
 - У каждого аккаунта своё пространство ключей в `localStorage`. После выхода кеш аккаунта на устройстве стирается. Под другим аккаунтом чужие данные не видны.
 - `js/sync.js` держит очередь изменений: интерфейс работает с локальным кешем, а правки уходят на сервер в фоне. Без сети очередь ждёт, выйти с неотправленными изменениями приложение не даст.
 - Если на устройстве остались планы из прежних версий без аккаунта, при первом входе приложение один раз предлагает их перенести. Строки вставляются с `ignoreDuplicates`, повторный перенос дублей не создаёт.
