@@ -450,11 +450,12 @@ textarea:focus-visible {
   text-underline-offset: 0.2em;
 }
 
-.link-btn:hover:not(:disabled) {
+.link-btn:hover:not(:disabled, [aria-disabled="true"]) {
   text-decoration-thickness: 2px;
 }
 
-.link-btn:disabled {
+.link-btn:disabled,
+.link-btn[aria-disabled="true"] {
   color: var(--text-muted);
   text-decoration: none;
   cursor: default;

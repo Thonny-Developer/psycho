@@ -1,5 +1,15 @@
-import { createPlan, getProgress, setStepDone, setSubstepDone, isValidType } from './plan.js';
+import {
+  createPlan,
+  getProgress,
+  setStepDone,
+  setSubstepDone,
+  insertSubsteps,
+  findStep,
+  isValidType,
+  plural,
+} from './plan.js';
 import { getFallbackSteps } from './fallback.js';
+import { requestSteps } from './api.js';
 import { getElements, renderForm, renderPlan, renderView, renderCounter, announce } from './render.js';
 
 const els = getElements();
@@ -28,6 +38,20 @@ function selectedType() {
   return els.form.elements.type.value;
 }
 
+/** Короткое объяснение для плашки офлайн-плана. */
+function fallbackReason(error) {
+  switch (error.kind) {
+    case 'offline':
+      return 'Нет интернета.';
+    case 'timeout':
+      return 'Сервис долго не отвечал.';
+    case 'rate_limit':
+      return 'Слишком много запросов, попробуй через минуту.';
+    default:
+      return 'Сервис сейчас недоступен.';
+  }
+}
+
 function showPlan(plan, { reason = null } = {}) {
   state.plan = plan;
   state.view = 'plan';
@@ -38,28 +62,98 @@ function showPlan(plan, { reason = null } = {}) {
   render();
   els.planTitle.focus({ preventScroll: true });
   window.scrollTo({ top: 0 });
-  announce(els, `План готов: ${plan.steps.length} шагов`);
+  const n = plan.steps.length;
+  announce(els, `План готов: ${n} ${plural(n, ['шаг', 'шага', 'шагов'])}${plan.source === 'fallback' ? ', офлайн-версия' : ''}`);
 }
 
-function buildPlan() {
-  const type = selectedType();
-  const description = els.description.value.trim();
-  const plan = createPlan({ type, description, steps: getFallbackSteps(type), source: 'fallback' });
-  showPlan(plan);
+/**
+ * Основной сценарий: просим план у API, при любой проблеме с сервисом показываем шаблон.
+ * Ошибку без плана показываем только на некорректный запрос: шаблон тут ничего не исправит.
+ */
+async function buildPlan({ type, description }) {
+  if (state.loading) return;
+  state.loading = true;
+  state.formError = null;
+  render();
+
+  try {
+    const steps = await requestSteps({ type, description });
+    showPlan(createPlan({ type, description, steps, source: 'api' }));
+  } catch (error) {
+    if (error.kind === 'bad_request') {
+      state.formError = { message: error.message, retryAction: 'retry-submit' };
+    } else {
+      showPlan(createPlan({ type, description, steps: getFallbackSteps(type), source: 'fallback' }), {
+        reason: fallbackReason(error),
+      });
+    }
+  } finally {
+    state.loading = false;
+    render();
+    // кнопка была disabled и потеряла фокус: возвращаем его к ошибке
+    if (state.formError) els.formError.querySelector('button')?.focus();
+  }
+}
+
+/** Повтор из плашки офлайн-плана: при неудаче текущий план с отметками остаётся на месте. */
+async function retryPlan() {
+  const { plan } = state;
+  if (state.loading || !plan) return;
+  state.loading = true;
+  render({ focusKey: 'retry-plan' });
+
+  try {
+    const steps = await requestSteps({ type: plan.type, description: plan.description });
+    state.loading = false;
+    showPlan(createPlan({ type: plan.type, description: plan.description, steps, source: 'api' }));
+  } catch (error) {
+    state.loading = false;
+    if (state.plan === plan) state.fallbackReason = `${fallbackReason(error)} Попробуй позже.`;
+    render({ focusKey: 'retry-plan' });
+    announce(els, 'Сервис всё ещё недоступен, остаётся офлайн-план');
+  }
 }
 
 function onSubmit(event) {
   event.preventDefault();
   if (state.loading) return;
 
-  if (!isValidType(selectedType())) {
+  const type = selectedType();
+  if (!isValidType(type)) {
     state.typeError = 'Выбери, что случилось, и план подстроится под ситуацию';
     render();
     els.form.querySelector('input[name="type"]').focus();
     return;
   }
   state.typeError = null;
-  buildPlan();
+  buildPlan({ type, description: els.description.value.trim() });
+}
+
+async function breakdownStep(stepId) {
+  const plan = state.plan;
+  const step = findStep(plan, stepId);
+  if (!step || state.breakdown[stepId]?.loading) return;
+
+  state.breakdown[stepId] = { loading: true };
+  render();
+
+  try {
+    const substeps = await requestSteps({ type: plan.type, description: plan.description, step: step.title });
+    // Пока ждали ответ, пользователь мог открыть другой план
+    if (state.plan?.id !== plan.id || !findStep(state.plan, stepId)) return;
+
+    delete state.breakdown[stepId];
+    state.plan = insertSubsteps(state.plan, stepId, substeps);
+    const inserted = findStep(state.plan, stepId).substeps;
+    inserted.forEach((sub) => state.newIds.add(sub.id));
+    render({ focusKey: `check-${inserted[0].id}` });
+    announce(els, `Добавлено подшагов: ${inserted.length}`);
+  } catch (error) {
+    if (state.plan?.id !== plan.id) return;
+    const reason = error.kind === 'offline' ? 'Нет интернета.' : fallbackReason(error);
+    state.breakdown[stepId] = { error: `Не получилось разбить шаг. ${reason}` };
+    render();
+  }
 }
 
 function updatePlan(plan) {
@@ -82,10 +176,14 @@ function onPlanChange(event) {
 function onPlanClick(event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
+  const { action, stepId } = button.dataset;
 
-  if (button.dataset.action === 'new-plan') {
+  if (action === 'breakdown') breakdownStep(stepId);
+  if (action === 'retry-plan') retryPlan();
+  if (action === 'new-plan') {
     state.view = 'form';
     state.plan = null;
+    state.breakdown = {};
     render();
     els.form.querySelector('input[name="type"]:checked, input[name="type"]').focus();
   }
@@ -98,6 +196,9 @@ function init() {
       state.typeError = null;
       render();
     }
+  });
+  els.formError.addEventListener('click', (event) => {
+    if (event.target.closest('[data-action="retry-submit"]')) els.form.requestSubmit();
   });
   els.description.addEventListener('input', () => renderCounter(els));
   els.viewPlan.addEventListener('change', onPlanChange);

@@ -158,7 +158,8 @@ function renderStep(step, index, state) {
         class: 'link-btn',
         dataset: { action: 'breakdown', stepId: step.id, focus: `breakdown-${step.id}` },
         'aria-busy': String(loading),
-        disabled: loading,
+        // aria-disabled, а не disabled: так кнопка сохраняет фокус на время загрузки
+        'aria-disabled': String(loading),
       },
       h('span', { class: 'spinner', 'aria-hidden': 'true' }),
       h('span', { class: 'btn__label' }, loading ? 'Разбиваю…' : 'Разбей этот шаг ещё мельче'),
