@@ -51,7 +51,7 @@ test('возвращает проверенные шаги и не светит 
   assert.ok(!JSON.stringify(res.payload).includes(KEY));
 
   const sent = JSON.parse(mockMistral.lastCall.options.body);
-  assert.equal(sent.model, 'mistral-small-latest');
+  assert.equal(sent.model, 'ministral-14b-latest');
   assert.deepEqual(sent.response_format, { type: 'json_object' });
   assert.equal(mockMistral.lastCall.options.headers.Authorization, `Bearer ${KEY}`);
 });

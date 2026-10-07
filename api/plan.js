@@ -11,7 +11,8 @@ import {
 } from '../js/plan.js';
 
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
-const MODEL = 'mistral-small-latest';
+// mistral-small-latest доступна не на всех тарифах (лимит 0 запросов), поэтому модель настраивается
+const DEFAULT_MODEL = 'ministral-14b-latest';
 const TIMEOUT_MS = 15_000;
 
 const PLAN_PROMPT = `Ты спокойный и конкретный коуч для студента, который в стрессе и не знает, с чего начать.
@@ -148,7 +149,7 @@ async function askMistral(input, apiKey) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: process.env.MISTRAL_MODEL || DEFAULT_MODEL,
         messages: buildMessages(input),
         response_format: { type: 'json_object' },
         temperature: 0.4,
