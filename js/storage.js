@@ -3,12 +3,22 @@
 
 import { isPlanShape, isValidType, migratePlan } from './plan.js';
 
-const KEYS = {
-  prefs: 'panic-mode:prefs',
-  session: 'panic-mode:session',
-  scenarios: 'panic-mode:scenarios',
-  legacyCurrent: 'panic-mode:current', // текущий план из первой версии
-};
+const PREFIX = 'panic-mode:';
+const PREFS_KEY = `${PREFIX}prefs`; // настройки устройства общие для гостя и аккаунтов
+
+/** Пространство ключей: у гостя прежние ключи, у каждого аккаунта свои, чтобы данные не смешивались. */
+export function userPrefix(userId) {
+  return `${PREFIX}u:${userId}:`;
+}
+
+function keysFor(prefix) {
+  return {
+    session: `${prefix}session`,
+    scenarios: `${prefix}scenarios`,
+    outbox: `${prefix}outbox`, // изменения, которые ещё не дошли до сервера
+    legacyCurrent: prefix === PREFIX ? `${PREFIX}current` : null, // текущий план из первой версии
+  };
+}
 
 export const MAX_SCENARIOS = 50;
 export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'settings'];
@@ -52,8 +62,13 @@ function cleanPlan(raw) {
   return isPlanShape(plan) ? plan : null;
 }
 
-/** backend передаётся явно в тестах; в браузере это localStorage. */
-export function createStorage(backend = defaultBackend()) {
+/**
+ * backend передаётся явно в тестах; в браузере это localStorage.
+ * prefix — пространство ключей: гость по умолчанию или userPrefix(id) для аккаунта.
+ */
+export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = {}) {
+  const KEYS = keysFor(prefix);
+
   function read(key, fallback) {
     if (!backend) return fallback;
     try {
@@ -91,15 +106,17 @@ export function createStorage(backend = defaultBackend()) {
 
   return {
     loadPrefs() {
-      const raw = read(KEYS.prefs, null);
+      const raw = read(PREFS_KEY, null);
       return {
         onboarded: raw?.onboarded === true,
         settings: cleanSettings(raw?.settings),
+        accountPromptSeen: raw?.accountPromptSeen === true,
+        accountHintSeen: raw?.accountHintSeen === true,
       };
     },
 
-    savePrefs({ onboarded, settings }) {
-      return write(KEYS.prefs, { onboarded, settings });
+    savePrefs({ onboarded, settings, accountPromptSeen = false, accountHintSeen = false }) {
+      return write(PREFS_KEY, { onboarded, settings, accountPromptSeen, accountHintSeen });
     },
 
     /** Где человек остановился: экран, тема, разговор и текущий план. */
@@ -117,7 +134,7 @@ export function createStorage(backend = defaultBackend()) {
       }
 
       // Первая версия хранила только текущий план: открываем его на экране плана
-      const legacy = cleanPlan(read(KEYS.legacyCurrent, null));
+      const legacy = KEYS.legacyCurrent ? cleanPlan(read(KEYS.legacyCurrent, null)) : null;
       if (legacy) {
         write(KEYS.legacyCurrent, null);
         return { screen: 'plan', type: legacy.type, messages: [], plan: legacy, planFrom: 'saved', calmMode: 'breath' };
@@ -127,6 +144,21 @@ export function createStorage(backend = defaultBackend()) {
 
     saveSession(session) {
       return write(KEYS.session, session);
+    },
+
+    /** Очередь несинхронизированных изменений: { [planId]: частичная строка таблицы plans } */
+    loadOutbox() {
+      const raw = read(KEYS.outbox, {});
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    },
+
+    saveOutbox(outbox) {
+      return write(KEYS.outbox, Object.keys(outbox).length ? outbox : null);
+    },
+
+    /** Полная замена списка сценариев данными с сервера. */
+    replaceScenarios(list) {
+      return writeScenarios(list);
     },
 
     listScenarios,
@@ -161,8 +193,11 @@ export function createStorage(backend = defaultBackend()) {
       return writeScenarios(next);
     },
 
-    clearAll() {
-      const results = Object.values(KEYS).map((key) => write(key, null));
+    /** Удаляет данные этого пространства. withPrefs — ещё и общие настройки устройства. */
+    clearAll({ withPrefs = true } = {}) {
+      const keys = Object.values(KEYS).filter(Boolean);
+      if (withPrefs) keys.push(PREFS_KEY);
+      const results = keys.map((key) => write(key, null));
       return results.find((r) => !r.ok) ?? { ok: true };
     },
   };

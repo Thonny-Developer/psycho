@@ -13,6 +13,7 @@ import {
   validateSteps,
 } from '../js/plan.js';
 import { validateMessages, validateReply } from '../js/chat.js';
+import { createRateLimiter, clientIp, getUser } from './_lib/auth.js';
 
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
 // mistral-small-latest доступна не на всех тарифах (лимит 0 запросов), поэтому модель настраивается
@@ -80,38 +81,12 @@ const PLAN_TOOL = {
 
 // ---------- Rate limit ----------
 
-/**
- * Фиксированное окно на IP. Счётчик живёт в памяти экземпляра функции,
- * поэтому защита примерная: у каждого «тёплого» экземпляра свой счётчик.
- */
-export function createRateLimiter({ limit = 20, windowMs = 60_000, maxKeys = 5_000 } = {}) {
-  const hits = new Map();
+// Аккаунт считаем по id пользователя (не обходится сменой сети), гостя — по IP
+const GUEST_LIMIT = 20;
+const USER_LIMIT = 30;
+const rateLimit = createRateLimiter({ limit: GUEST_LIMIT });
 
-  return function check(key, now = Date.now()) {
-    let entry = hits.get(key);
-    if (!entry || now >= entry.resetAt) {
-      if (hits.size >= maxKeys) {
-        for (const [k, e] of hits) if (now >= e.resetAt) hits.delete(k);
-        if (hits.size >= maxKeys) hits.clear();
-      }
-      entry = { count: 0, resetAt: now + windowMs };
-      hits.set(key, entry);
-    }
-    entry.count += 1;
-    const ok = entry.count <= limit;
-    return { ok, retryAfter: ok ? 0 : Math.ceil((entry.resetAt - now) / 1000) };
-  };
-}
-
-const rateLimit = createRateLimiter();
-
-function clientIp(req) {
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp) return realIp;
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded) return forwarded.split(',')[0].trim();
-  return req.socket?.remoteAddress ?? 'unknown';
-}
+export { createRateLimiter };
 
 // ---------- Валидация входа ----------
 
@@ -298,7 +273,8 @@ export default async function handler(req, res) {
     return sendError(res, 405, 'Метод не поддерживается');
   }
 
-  const limit = rateLimit(clientIp(req));
+  const user = await getUser(req);
+  const limit = user ? rateLimit(`user:${user.id}`, Date.now(), USER_LIMIT) : rateLimit(`ip:${clientIp(req)}`);
   if (!limit.ok) {
     res.setHeader('Retry-After', String(limit.retryAfter));
     return sendError(res, 429, 'Слишком много запросов. Подожди минуту');

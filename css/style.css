@@ -2321,3 +2321,8 @@ textarea::placeholder {
   gap: 8px;
   margin-top: 6px;
 }
+
+.noscript {
+  padding: 24px;
+  font-family: var(--sans);
+}

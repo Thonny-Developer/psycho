@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStorage, MAX_SCENARIOS, DEFAULT_SETTINGS } from '../js/storage.js';
+import { createStorage, userPrefix, MAX_SCENARIOS, DEFAULT_SETTINGS } from '../js/storage.js';
 import { createPlan, setStepDone } from '../js/plan.js';
 import { makeMessage } from '../js/chat.js';
 
@@ -27,13 +27,15 @@ const makePlan = (title = 'Курсовая') =>
 
 test('настройки и онбординг переживают перезагрузку, мусор заменяется значениями по умолчанию', () => {
   const backend = memoryBackend();
-  assert.deepEqual(createStorage(backend).loadPrefs(), { onboarded: false, settings: DEFAULT_SETTINGS });
+  const empty = { onboarded: false, settings: DEFAULT_SETTINGS, accountPromptSeen: false, accountHintSeen: false };
+  assert.deepEqual(createStorage(backend).loadPrefs(), empty);
 
-  createStorage(backend).savePrefs({ onboarded: true, settings: { theme: 'dark', fs: 'xl', reduce: true } });
-  assert.deepEqual(createStorage(backend).loadPrefs(), { onboarded: true, settings: { theme: 'dark', fs: 'xl', reduce: true } });
+  const prefs = { onboarded: true, settings: { theme: 'dark', fs: 'xl', reduce: true }, accountPromptSeen: true, accountHintSeen: false };
+  createStorage(backend).savePrefs(prefs);
+  assert.deepEqual(createStorage(backend).loadPrefs(), prefs);
 
   backend.setItem('panic-mode:prefs', JSON.stringify({ onboarded: 'да', settings: { theme: 'neon', fs: 9, reduce: 'нет' } }));
-  assert.deepEqual(createStorage(backend).loadPrefs(), { onboarded: false, settings: DEFAULT_SETTINGS });
+  assert.deepEqual(createStorage(backend).loadPrefs(), empty);
 });
 
 test('сессия: экран, разговор и план', () => {
@@ -140,4 +142,43 @@ test('без localStorage всё работает, но ничего не сох
   assert.equal(storage.loadSession(), null);
   assert.deepEqual(storage.listScenarios(), []);
   assert.deepEqual(storage.saveSession({}), { ok: false, error: 'unavailable' });
+});
+
+test('у гостя и у каждого аккаунта свои данные, настройки устройства общие', () => {
+  const backend = memoryBackend();
+  const guest = createStorage(backend);
+  const anna = createStorage(backend, { prefix: userPrefix('anna') });
+  const boris = createStorage(backend, { prefix: userPrefix('boris') });
+
+  guest.addScenario(makePlan('гостевой'));
+  anna.addScenario(makePlan('Анны'));
+  assert.deepEqual(guest.listScenarios().map((s) => s.title), ['гостевой']);
+  assert.deepEqual(anna.listScenarios().map((s) => s.title), ['Анны']);
+  assert.deepEqual(boris.listScenarios(), []);
+
+  guest.savePrefs({ onboarded: true, settings: { theme: 'dark', fs: 'm', reduce: null } });
+  assert.equal(anna.loadPrefs().settings.theme, 'dark');
+
+  // Выход из аккаунта стирает только его данные
+  anna.clearAll({ withPrefs: false });
+  assert.deepEqual(anna.listScenarios(), []);
+  assert.equal(guest.listScenarios().length, 1);
+  assert.equal(guest.loadPrefs().onboarded, true);
+});
+
+test('очередь изменений для сервера', () => {
+  const storage = createStorage(memoryBackend(), { prefix: userPrefix('anna') });
+  assert.deepEqual(storage.loadOutbox(), {});
+  storage.saveOutbox({ p1: { id: 'p1', title: 'x' } });
+  assert.deepEqual(storage.loadOutbox(), { p1: { id: 'p1', title: 'x' } });
+  storage.saveOutbox({});
+  assert.deepEqual(storage.loadOutbox(), {});
+});
+
+test('у аккаунта нет переноса старого текущего плана гостя', () => {
+  const backend = memoryBackend();
+  const old = { ...makePlan(), description: 'Падает сборка' };
+  delete old.title;
+  backend.setItem('panic-mode:current', JSON.stringify(old));
+  assert.equal(createStorage(backend, { prefix: userPrefix('anna') }).loadSession(), null);
 });

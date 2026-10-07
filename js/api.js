@@ -2,6 +2,12 @@ import { validatePlan, validateSteps, SUBSTEP_LIMITS } from './plan.js';
 import { toApiMessages, validateReply } from './chat.js';
 
 const ENDPOINT = '/api/plan';
+
+// Токен аккаунта, если человек вошёл: сервер считает лимит запросов по аккаунту, а не по IP
+let tokenProvider = async () => null;
+export function setTokenProvider(fn) {
+  tokenProvider = fn;
+}
 // Чуть больше серверного таймаута к Mistral (15 с), чтобы сервер успел вернуть свою ошибку
 const TIMEOUT_MS = 20_000;
 
@@ -24,11 +30,15 @@ async function post(payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  const headers = { 'Content-Type': 'application/json' };
+  const token = await tokenProvider().catch(() => null);
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   let response;
   try {
     response = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
