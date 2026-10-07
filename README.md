@@ -63,7 +63,6 @@ npm test
 | `APP_URL` | `api/config.js`: адрес для ссылок из писем и возврата после Google | желательно; без него — домен продакшена Vercel |
 | `SUPABASE_PUBLISHABLE_KEY` (или `SUPABASE_ANON_KEY`) | отдаётся браузеру через `api/config.js`, публичный | для аккаунтов |
 | `SUPABASE_SECRET_KEY` (или `SUPABASE_SERVICE_ROLE_KEY`) | только `api/account.js`, удаление аккаунта | для удаления аккаунта |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SENDER_EMAIL`, `SMTP_SENDER_NAME` | не в коде: значения для Supabase → SMTP Settings (см. «Почта (SMTP)») | для настоящего запуска, в Vercel не нужны |
 
 Из терминала: `npx vercel` для превью, `npx vercel --prod` для продакшена, `npx vercel env add MISTRAL_API_KEY` для ключа.
 
@@ -83,18 +82,6 @@ npm test
 6. Вход через Google: в Google Cloud Console создай OAuth Client (Web), в Authorized redirect URIs добавь `https://<project>.supabase.co/auth/v1/callback`. Client ID и Secret вставь в Supabase → Providers → Google.
 7. В Vercel → Settings → Environment Variables добавь `SUPABASE_URL` (Project Settings → Data API) и `SUPABASE_PUBLISHABLE_KEY` (Project Settings → API Keys, `sb_publishable_…`). Этот ключ публичный по замыслу: данные защищают политики RLS. Для удаления аккаунта нужен ещё `SUPABASE_SECRET_KEY` (`sb_secret_…`): он используется только в `api/account.js` и в браузер не попадает никогда. Старые имена `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY` с legacy-ключами (`eyJ…`) тоже работают.
 8. Проверить политики и триггеры: `psql "<строка подключения>" -v ON_ERROR_STOP=1 -f supabase/tests/<файл>.sql` для `rls_test.sql`, `streak_test.sql` и `content_test.sql`. Скрипты работают в транзакции и всё откатывают.
-
-### Почта (SMTP)
-
-Письма для подтверждения регистрации и сброса пароля шлёт Supabase Auth. Встроенный почтовый сервис Supabase отправляет всего несколько писем в час и годится только для проверки, поэтому для настоящего запуска нужен свой SMTP.
-
-1. Заведи отправку у почтового сервиса (например, Resend, Brevo или Mailgun) и подтверди домен отправителя. Для пробы подойдёт Gmail с паролем приложения.
-2. Заполни в `.env` блок `SMTP_*` по `.env.example`: так значения хранятся в одном месте и не попадают в git.
-3. Перенеси их в Supabase → Authentication → Emails → SMTP Settings: включи Enable Custom SMTP, затем Host ← `SMTP_HOST`, Port ← `SMTP_PORT`, Username ← `SMTP_USER`, Password ← `SMTP_PASS`, Sender email ← `SMTP_SENDER_EMAIL`, Sender name ← `SMTP_SENDER_NAME`.
-4. Там же, в Rate Limits, подними лимит писем в час под ожидаемую нагрузку.
-5. Проверь: зарегистрируйся на новый адрес и нажми «Не помню пароль» — оба письма должны прийти от твоего отправителя.
-
-Приложение SMTP-переменные не читает, и в Vercel их добавлять не нужно. Через `supabase/config.toml` настройки не задаются намеренно: `supabase config push` отправил бы в проект и остальные параметры Auth со значениями по умолчанию и мог бы сбросить адреса редиректов и вход через Google.
 
 ### Данные и доступ
 
@@ -298,4 +285,4 @@ vercel.json              maxDuration функции и заголовки без
 - CSP разрешает запросы к `*.supabase.co`, а не к одному проекту: так один `vercel.json` подходит для любого проекта Supabase.
 - Supabase в этом репозитории проверен на локальном PostgreSQL с имитацией схемы `auth` и в браузере на имитации API. Перед защитой стоит пройти вход, синхронизацию и удаление аккаунта на настоящем проекте.
 - Лимит запросов к AI хранится в памяти функции (см. выше), проверка токена кешируется на минуту: если отозвать сессию, лимит по ней ещё минуту считается по аккаунту.
-- Встроенная почта Supabase отправляет мало писем в час; для настоящего запуска нужен свой SMTP (раздел «Почта (SMTP)»).
+- Письма подтверждения и сброса пароля отправляет встроенная почта Supabase, а у неё лимит — несколько писем в час. Для настоящего запуска можно подключить свой SMTP прямо в панели Supabase (Authentication → Emails → SMTP Settings); приложение для этого менять не нужно.
