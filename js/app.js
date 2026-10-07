@@ -30,7 +30,6 @@ const state = {
   loading: false,
   typeError: null,
   formError: null,
-  fallbackReason: null,
   saveError: null,
   breakdown: {}, // stepId -> { loading: true } | { error: 'текст' }
   newIds: new Set(), // элементы, которые нужно один раз анимировать при появлении
@@ -90,10 +89,9 @@ function fallbackReason(error) {
   }
 }
 
-function showPlan(plan, { reason = null } = {}) {
+function showPlan(plan) {
   state.plan = plan;
   state.view = 'plan';
-  state.fallbackReason = reason;
   state.breakdown = {};
   state.newIds = new Set(plan.steps.map((s) => s.id));
   persistPlan();
@@ -121,9 +119,9 @@ async function buildPlan({ type, description }) {
     if (error.kind === 'bad_request') {
       state.formError = { message: error.message, retryAction: 'retry-submit' };
     } else {
-      showPlan(createPlan({ type, description, steps: getFallbackSteps(type), source: 'fallback' }), {
-        reason: fallbackReason(error),
-      });
+      // Причина хранится в самом плане, чтобы плашка была точной и после перезагрузки
+      const plan = createPlan({ type, description, steps: getFallbackSteps(type), source: 'fallback' });
+      showPlan({ ...plan, fallbackReason: fallbackReason(error) });
     }
   } finally {
     state.loading = false;
@@ -146,7 +144,10 @@ async function retryPlan() {
     showPlan(createPlan({ type: plan.type, description: plan.description, steps, source: 'api' }));
   } catch (error) {
     state.loading = false;
-    if (state.plan === plan) state.fallbackReason = `${fallbackReason(error)} Попробуй позже.`;
+    if (state.plan === plan) {
+      state.plan = { ...plan, fallbackReason: `${fallbackReason(error)} Попробуй позже.` };
+      persistPlan();
+    }
     render({ focusKey: 'retry-plan' });
     announce(els, 'Сервис всё ещё недоступен, остаётся офлайн-план');
   }
@@ -247,7 +248,6 @@ function openScenario(id) {
   if (!scenario) return;
   state.plan = scenario;
   state.view = 'plan';
-  state.fallbackReason = null;
   state.breakdown = {};
   state.saveError = null;
   persistPlan();

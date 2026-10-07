@@ -108,9 +108,10 @@ function renderBanner(els, state) {
   els.banner.hidden = plan.source !== 'fallback';
   if (els.banner.hidden) return;
 
-  const text = state.fallbackReason
-    ? `Показан офлайн-план. ${state.fallbackReason}`
-    : 'Показан офлайн-план: это общий шаблон, без учёта твоего описания.';
+  // У планов, сохранённых до появления fallbackReason, причины нет
+  const text = plan.fallbackReason
+    ? `Показан офлайн-план. ${plan.fallbackReason}`
+    : 'Показан офлайн-план, собранный раньше. Нажми «Попробовать снова», чтобы получить план под твою ситуацию.';
   const retry = h(
     'button',
     { type: 'button', class: 'link-btn', dataset: { action: 'retry-plan', focus: 'retry-plan' }, disabled: state.loading },
