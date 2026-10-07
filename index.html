@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Паника-режим</title>
+  <meta name="description" content="Превращает большую проблему в несколько конкретных шагов">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121514" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232c6e67'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержимому</a>
+
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <span class="logo">Паника-режим</span>
+      <a class="header-link" href="#saved">Сохранённые <span class="badge" id="saved-count" hidden></span></a>
+    </div>
+  </header>
+
+  <main id="main" class="container">
+    <p id="status" class="visually-hidden" role="status" aria-live="polite"></p>
+
+    <section id="view-form" class="view" aria-labelledby="form-title">
+      <h1 id="form-title" class="hero-title">Выдохни. Разберёмся по шагам.</h1>
+      <p class="lead">Выбери, что случилось. Получишь короткий план, который можно начать прямо сейчас.</p>
+
+      <form id="plan-form" class="plan-form" novalidate>
+        <fieldset class="types" aria-describedby="type-error">
+          <legend class="field-label">Что горит?</legend>
+          <div class="types__grid">
+            <div class="type-card">
+              <input type="radio" name="type" id="type-deadline" value="deadline">
+              <label for="type-deadline">
+                <span class="type-card__title">Дедлайн по проекту</span>
+                <span class="type-card__hint">Сдавать скоро, а сделано мало</span>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="type" id="type-exam" value="exam">
+              <label for="type-exam">
+                <span class="type-card__title">Экзамен завтра</span>
+                <span class="type-card__hint">Времени мало, материала много</span>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="type" id="type-debt" value="debt">
+              <label for="type-debt">
+                <span class="type-card__title">Долг по предмету</span>
+                <span class="type-card__hint">Хвост, который надо закрыть</span>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="type" id="type-bug" value="bug">
+              <label for="type-bug">
+                <span class="type-card__title">Сломался код</span>
+                <span class="type-card__hint">Баг, и непонятно, где копать</span>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="type" id="type-topic" value="topic">
+              <label for="type-topic">
+                <span class="type-card__title">Не понимаю тему</span>
+                <span class="type-card__hint">Читаю, а в голове не складывается</span>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="type" id="type-all" value="all">
+              <label for="type-all">
+                <span class="type-card__title">Всё сразу</span>
+                <span class="type-card__hint">Не знаю, за что хвататься</span>
+              </label>
+            </div>
+          </div>
+          <p id="type-error" class="field-error" hidden></p>
+        </fieldset>
+
+        <div class="field">
+          <div class="field__head">
+            <label class="field-label" for="description">Опиши ситуацию <span class="optional">необязательно</span></label>
+            <span id="description-counter" class="counter">0 / 300</span>
+          </div>
+          <textarea id="description" name="description" rows="3" maxlength="300"
+            aria-describedby="description-counter"
+            placeholder="Например: курсовая по базам данных, сдать в пятницу, есть только план"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button id="submit-btn" class="btn btn--primary btn--large" type="submit">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="btn__label">Спасайте</span>
+          </button>
+          <div id="form-error" class="inline-error" hidden></div>
+        </div>
+      </form>
+
+      <div id="plan-skeleton" class="skeleton" hidden aria-hidden="true">
+        <div class="skeleton__line skeleton__line--title"></div>
+        <div class="skeleton__line"></div>
+        <div class="skeleton__line"></div>
+        <div class="skeleton__line"></div>
+        <div class="skeleton__line skeleton__line--short"></div>
+      </div>
+    </section>
+
+    <section id="view-plan" class="view" aria-labelledby="plan-title" hidden>
+      <div id="plan-banner" class="banner" hidden></div>
+
+      <div class="plan-head">
+        <p id="plan-type" class="eyebrow"></p>
+        <h2 id="plan-title" class="plan-title" tabindex="-1">Твой план</h2>
+        <p id="plan-description" class="plan-description" hidden></p>
+      </div>
+
+      <div class="progress">
+        <div class="progress__text">
+          <span>Прогресс</span>
+          <span id="progress-label">0 из 0</span>
+        </div>
+        <div id="progress-bar" class="progress__track" role="progressbar"
+          aria-label="Выполнено шагов" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <div id="progress-fill" class="progress__fill"></div>
+        </div>
+      </div>
+
+      <ol id="steps" class="steps"></ol>
+
+      <div id="congrats" class="congrats" hidden>
+        <p class="congrats__title">Все шаги закрыты</p>
+        <p class="congrats__text">То, что недавно казалось неподъёмным, уже позади. Сделай перерыв, хотя бы на десять минут.</p>
+      </div>
+
+      <div class="plan-actions">
+        <button id="save-btn" class="btn btn--secondary" type="button" data-action="save">Сохранить сценарий</button>
+        <button id="new-plan-btn" class="btn btn--ghost" type="button" data-action="new-plan">Новый план</button>
+      </div>
+      <div id="save-error" class="inline-error" hidden></div>
+    </section>
+
+    <section id="saved" class="saved" aria-labelledby="saved-title">
+      <h2 id="saved-title" class="section-title">Сохранённые сценарии</h2>
+      <div id="saved-error" class="inline-error" hidden></div>
+      <ul id="saved-list" class="saved-list"></ul>
+      <div id="saved-empty" class="empty">
+        <p class="empty__title">Пока пусто</p>
+        <p class="empty__text">Когда план поможет, нажми «Сохранить сценарий». Он появится здесь, и в следующий раз не придётся собирать его заново.</p>
+      </div>
+    </section>
+  </main>
+
+  <noscript>
+    <p class="container noscript">Для работы приложения нужен JavaScript.</p>
+  </noscript>
+</body>
+</html>
