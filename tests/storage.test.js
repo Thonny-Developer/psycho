@@ -200,3 +200,12 @@ test('серия хранится отдельно у гостя и аккаун
   backend.setItem('panic-mode:streak', JSON.stringify({ activity: { 'вчера': ['x'], '2026-10-06': ['ok', 5] }, doneDays: ['2026-10-06', 'завтра', 7] }));
   assert.deepEqual(guest.loadStreak(), { activity: { '2026-10-06': ['ok'] }, doneDays: ['2026-10-06'] });
 });
+
+test('отдых: избранное и отметки самочувствия, мусор отбрасывается', () => {
+  const backend = memoryBackend();
+  const storage = createStorage(backend);
+  assert.deepEqual(storage.loadRest(), { favorites: [], checks: [] });
+  const check = { id: 'c1', videoId: 'calm-nature', before: 1, after: 3, at: 1 };
+  storage.saveRest({ favorites: ['calm-nature', 'calm-nature', 'BAD ID'], checks: [check, { id: 'c2', videoId: 'calm-nature', before: 9, after: 1 }] });
+  assert.deepEqual(storage.loadRest(), { favorites: ['calm-nature'], checks: [check] });
+});

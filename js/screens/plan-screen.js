@@ -121,6 +121,8 @@ export function createPlanScreen({ actions }) {
           }, h('div', { class: 'bar__fill', style: { width: `${p.percent}%` } }))),
         h('ol', { class: 'steps' }, plan.steps.map((s, i) => stepNode(s, i, state, actions))),
         h('p', { class: 'plan-hint' }, 'Не обязательно по порядку. Один шаг — уже движение.'),
+        p.complete ? null : h('button', { class: 'btn btn--text btn--auto', type: 'button', dataset: { focus: 'plan-break' }, onClick: actions.startBreak },
+          icon(IC.timer, 20, { strokeWidth: 1.8 }), 'Перерыв на 5 минут'),
       ], focusKey);
 
       const saved = state.scenarios.some((s) => s.id === plan.id);

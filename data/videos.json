@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "note": "Видео встраиваются с youtube-nocookie.com, сами ролики не хостим. youtube_id вставляется вручную после проверки ролика на уместность (см. README, раздел «Отдых»). Записи с youtube_id: null в приложении не показываются.",
+  "videos": [
+    {
+      "id": "calm-nature",
+      "title": "Спокойная природа: лес, вода, птицы",
+      "youtube_id": null,
+      "duration_sec": null,
+      "mood": "calm",
+      "source_channel": null,
+      "todo": "Найти ролик 2–5 минут без резких звуков и рекламы внутри, вставить youtube_id, длительность и канал"
+    },
+    {
+      "id": "calm-breathing-animation",
+      "title": "Мягкая анимация для медленного дыхания",
+      "youtube_id": null,
+      "duration_sec": null,
+      "mood": "calm",
+      "source_channel": null,
+      "todo": "Короткая спокойная анимация до 5 минут, без голоса или с тихим голосом"
+    },
+    {
+      "id": "smile-animals",
+      "title": "Добрые животные",
+      "youtube_id": null,
+      "duration_sec": null,
+      "mood": "smile",
+      "source_channel": null,
+      "todo": "Короткий ролик с животными без насмешек над ними и без тревожных сцен"
+    },
+    {
+      "id": "switch-cartoon",
+      "title": "Короткий добрый мультфильм",
+      "youtube_id": null,
+      "duration_sec": null,
+      "mood": "switch",
+      "source_channel": null,
+      "todo": "Мультфильм до 10 минут с официального канала студии, без жестоких сцен"
+    },
+    {
+      "id": "laugh-sketch",
+      "title": "Лёгкий смешной ролик",
+      "youtube_id": null,
+      "duration_sec": null,
+      "mood": "laugh",
+      "source_channel": null,
+      "todo": "Юмор без унижения людей, мата и тем, которые могут ранить человека в стрессе"
+    }
+  ]
+}

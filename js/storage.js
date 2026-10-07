@@ -18,12 +18,13 @@ function keysFor(prefix) {
     outbox: `${prefix}outbox`, // изменения, которые ещё не дошли до сервера
     streak: `${prefix}streak`, // журнал активности и засчитанные дни
     books: `${prefix}books`, // статусы книг { bookId: 'want' | 'reading' | 'done' }
+    rest: `${prefix}rest`, // избранные видео и отметки самочувствия
     legacyCurrent: prefix === PREFIX ? `${PREFIX}current` : null, // текущий план из первой версии
   };
 }
 
 export const MAX_SCENARIOS = 50;
-export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile', 'streak', 'library'];
+export const SCREENS = ['onb', 'home', 'calm', 'chat', 'plan', 'done', 'saved', 'profile', 'streak', 'library', 'rest'];
 const RENAMED_SCREENS = { settings: 'profile' }; // экраны, переименованные в новых версиях
 
 export const DEFAULT_SETTINGS = { theme: 'system', fs: 'm', reduce: null };
@@ -192,6 +193,23 @@ export function createStorage(backend = defaultBackend(), { prefix = PREFIX } = 
 
     saveBookStatuses(statuses) {
       return write(KEYS.books, statuses);
+    },
+
+    /** Отдых: { favorites: [videoId], checks: [{ id, videoId, before, after, at }] } */
+    loadRest() {
+      const raw = read(KEYS.rest, null);
+      const idOk = (v) => typeof v === 'string' && /^[a-z0-9-]{3,60}$/.test(v);
+      const feeling = (v) => v === 1 || v === 2 || v === 3;
+      return {
+        favorites: Array.isArray(raw?.favorites) ? [...new Set(raw.favorites.filter(idOk))] : [],
+        checks: Array.isArray(raw?.checks)
+          ? raw.checks.filter((c) => c && typeof c.id === 'string' && idOk(c.videoId) && feeling(c.before) && feeling(c.after)).slice(-500)
+          : [],
+      };
+    },
+
+    saveRest(rest) {
+      return write(KEYS.rest, rest);
     },
 
     /** Полная замена списка сценариев данными с сервера. */

@@ -66,6 +66,9 @@ function statsGrid(stats, streak, actions) {
       h('div', { role: 'listitem' }, stat(streak.current, `${daysWord(streak.current)} подряд сейчас`)),
       h('div', { role: 'listitem' }, stat(streak.best, `${daysWord(streak.best)} — лучшая серия`))),
     badgeList(streak.best),
+    stats.mood.total
+      ? h('p', { class: 'text-14 muted' }, `После видео в «Отдыхе» стало легче в ${stats.mood.better} из ${stats.mood.total} ${plural(stats.mood.total, ['случая', 'случаев', 'случаев'])}.`)
+      : null,
     h('button', { class: 'link', type: 'button', style: { alignSelf: 'flex-start' }, dataset: { focus: 'open-streak' }, onClick: actions.openStreak }, 'Календарь и график серии'));
 }
 

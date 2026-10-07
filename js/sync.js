@@ -69,6 +69,16 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
 
   /** Одна запись очереди → запрос. Статусы книг лежат в очереди с ключом book:<id>. */
   function send(client, row) {
+    if (row._table === 'video_favorites') {
+      if (!row.favorite) return client.from('video_favorites').delete().eq('video_id', row.video_id);
+      return client.from('video_favorites').upsert({ user_id: userId, video_id: row.video_id }, { onConflict: 'user_id,video_id', ignoreDuplicates: true });
+    }
+    if (row._table === 'mood_checks') {
+      return client.from('mood_checks').upsert(
+        { id: row.check_id, user_id: userId, video_id: row.video_id, before: row.before, after: row.after },
+        { onConflict: 'id', ignoreDuplicates: true },
+      );
+    }
     if (row._table === 'book_status') {
       if (!row.status) return client.from('book_status').delete().eq('book_id', row.book_id);
       return client.from('book_status').upsert({ user_id: userId, book_id: row.book_id, status: row.status }, { onConflict: 'user_id,book_id' });
@@ -134,6 +144,40 @@ export function createSync({ storage, userId, onExpired = () => {}, onChange = (
     /** Статус книги; null — снять отметку. */
     setBookStatus(bookId, status) {
       queue({ id: `book:${bookId}`, _table: 'book_status', book_id: bookId, status: status ?? null });
+    },
+
+    setFavorite(videoId, favorite) {
+      queue({ id: `fav:${videoId}`, _table: 'video_favorites', video_id: videoId, favorite });
+    },
+
+    addMoodCheck(check) {
+      queue({ id: `mood:${check.id}`, _table: 'mood_checks', check_id: check.id, video_id: check.videoId, before: check.before, after: check.after });
+    },
+
+    /** Избранное и отметки самочувствия с сервера с учётом очереди, или null без связи. */
+    async pullRest() {
+      const client = await getClient();
+      if (!client) return null;
+      const [fav, moods] = await Promise.all([
+        client.from('video_favorites').select('video_id'),
+        client.from('mood_checks').select('id, video_id, before, after, created_at').order('created_at', { ascending: true }).limit(500),
+      ]);
+      if (fav.error || moods.error) {
+        if (isAuthError(fav.error) || isAuthError(moods.error)) onExpired();
+        return null;
+      }
+      const favorites = new Set(fav.data.map((r) => r.video_id));
+      const checks = moods.data.map((r) => ({ id: r.id, videoId: r.video_id, before: r.before, after: r.after, at: Date.parse(r.created_at) }));
+      for (const row of Object.values(storage.loadOutbox())) {
+        if (row._table === 'video_favorites') {
+          if (row.favorite) favorites.add(row.video_id);
+          else favorites.delete(row.video_id);
+        }
+        if (row._table === 'mood_checks' && !checks.some((c) => c.id === row.check_id)) {
+          checks.push({ id: row.check_id, videoId: row.video_id, before: row.before, after: row.after, at: Date.now() });
+        }
+      }
+      return { favorites: [...favorites], checks };
     },
 
     /** Статусы книг с сервера с учётом неотправленных изменений, или null без связи. */

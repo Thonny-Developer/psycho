@@ -55,6 +55,8 @@ import { dayKey, recordActivity, withCompletion, evaluateDay, syncToday, compute
 import { createStreakScreen } from './screens/streak.js';
 import { createLibrary, createBook } from './screens/library.js';
 import { parseLibrary, isStatus } from './library.js';
+import { createRest, createVideo, createBreak } from './screens/rest.js';
+import { parseVideos, byMood, breakVideos, nextVideo, firstOpenStep, isFeeling, moodStats, BREAK_SECONDS } from './rest.js';
 
 // У гостя и у каждого аккаунта своё пространство в localStorage, чтобы данные не смешивались.
 // Сохранённая сессия Supabase читается сразу, чтобы после перезагрузки не мелькали данные гостя.
@@ -130,6 +132,16 @@ function baseState() {
     libraryTopic: null,
     bookId: null,
     bookStatuses: {},
+    videos: { status: 'idle', list: null },
+    restMood: null,
+    videoId: null,
+    videoStage: 'before', // before | watch | after | thanks
+    moodBefore: null,
+    nextVideoId: null,
+    favorites: [],
+    moodChecks: [],
+    breakEndsAt: null,
+    returnStep: null,
   };
 }
 
@@ -142,6 +154,9 @@ function initialState() {
   state.firstSeenAt ??= Date.now();
   state.streakLocal = storage.loadStreak();
   state.bookStatuses = storage.loadBookStatuses();
+  const rest = storage.loadRest();
+  state.favorites = rest.favorites;
+  state.moodChecks = rest.checks;
 
   if (session) {
     Object.assign(state, session);
@@ -181,7 +196,7 @@ function persist() {
     reminderTime: state.reminderTime,
     firstSeenAt: state.firstSeenAt,
   });
-  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done', 'streak', 'library'];
+  const keep = ['calm', 'chat', 'plan', 'saved', 'profile', 'done', 'streak', 'library', 'rest'];
   storage.saveSession({
     screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
     type: state.type,
@@ -280,6 +295,8 @@ const actions = {
     if (state.screen === 'profile-edit') return setState({ screen: 'profile' });
     if (state.screen === 'streak') return setState({ screen: state.streakReturn ?? 'home' });
     if (state.screen === 'book') return setState({ screen: 'library' });
+    if (state.screen === 'video') return actions.closeVideo();
+    if (state.screen === 'break') return actions.endBreak();
     if (state.screen === 'plan') {
       return setState({ screen: state.planFrom === 'saved' ? 'saved' : state.messages.length ? 'chat' : 'home' });
     }
@@ -461,6 +478,75 @@ const actions = {
     sync?.setBookStatus(bookId, status);
     setState({ bookStatuses }, { focusKey: status ? `status-${status}` : undefined });
     announce(status ? 'Отметка сохранена' : 'Отметка снята');
+  },
+
+  // ---------- Отдых ----------
+
+  openRest() {
+    setState({ screen: 'rest' });
+    if (state.videos.status !== 'ready') actions.loadVideos();
+  },
+
+  async loadVideos() {
+    if (state.videos.status === 'loading') return;
+    setState({ videos: { ...state.videos, status: 'loading' } });
+    try {
+      const res = await fetch('data/videos.json', { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(String(res.status));
+      setState({ videos: { status: 'ready', list: parseVideos(await res.json()) } });
+    } catch {
+      setState({ videos: { status: 'error', list: null } });
+    }
+  },
+
+  setRestMood(mood) {
+    state = { ...state, restMood: mood };
+  },
+
+  openVideo(id) {
+    const list = state.videos.list ?? [];
+    const pool = state.breakEndsAt ? breakVideos(list) : byMood(list, state.restMood);
+    setState({
+      screen: 'video',
+      videoId: id,
+      videoStage: 'before',
+      moodBefore: null,
+      nextVideoId: nextVideo(pool, id)?.id ?? null,
+    });
+  },
+
+  setFeeling(which, value) {
+    if (which === 'before') return setState({ moodBefore: isFeeling(value) ? value : null, videoStage: 'watch' });
+    if (!isFeeling(value) || !state.moodBefore) return actions.closeVideo();
+    const check = { id: crypto.randomUUID(), videoId: state.videoId, before: state.moodBefore, after: value, at: Date.now() };
+    const moodChecks = [...state.moodChecks, check].slice(-500);
+    storage.saveRest({ favorites: state.favorites, checks: moodChecks });
+    sync?.addMoodCheck(check);
+    setState({ moodChecks, videoStage: 'thanks' });
+  },
+
+  finishVideo: () => (state.moodBefore ? setState({ videoStage: 'after' }) : actions.closeVideo()),
+
+  closeVideo: () => setState({ screen: state.breakEndsAt && state.breakEndsAt > Date.now() ? 'break' : 'rest' }),
+
+  toggleFavorite(videoId) {
+    const on = !state.favorites.includes(videoId);
+    const favorites = on ? [...state.favorites, videoId] : state.favorites.filter((id) => id !== videoId);
+    storage.saveRest({ favorites, checks: state.moodChecks });
+    sync?.setFavorite(videoId, on);
+    setState({ favorites });
+    announce(on ? 'Добавлено в избранное' : 'Убрано из избранного');
+  },
+
+  startBreak() {
+    setState({ screen: 'break', breakEndsAt: Date.now() + BREAK_SECONDS * 1000, returnStep: firstOpenStep(state.plan) });
+    announce('Перерыв на 5 минут начался');
+    if (state.videos.status !== 'ready') actions.loadVideos();
+  },
+
+  endBreak() {
+    const toPlan = Boolean(state.returnStep && state.plan);
+    setState({ breakEndsAt: null, screen: toPlan ? 'plan' : 'home', returnStep: null });
   },
 
   openStreak: () => setState({ screen: 'streak', streakReturn: state.screen === 'streak' ? state.streakReturn : state.screen, streakMonth: null }),
@@ -787,6 +873,8 @@ function dataFromStorage() {
     streakLocal: storage.loadStreak(),
     serverDays: [],
     bookStatuses: storage.loadBookStatuses(),
+    favorites: storage.loadRest().favorites,
+    moodChecks: storage.loadRest().checks,
     messages: session?.messages ?? [],
     type: session?.type ?? null,
     plan: session?.plan ?? null,
@@ -842,11 +930,14 @@ async function refreshFromServer() {
   const serverDays = await sync?.pullStreak();
   const statuses = await sync?.pullBookStatuses();
   if (statuses) storage.saveBookStatuses(statuses);
+  const rest = await sync?.pullRest();
+  if (rest) storage.saveRest(rest);
   setState({
     scenarios: storage.listScenarios(),
     serverPlans: pulled.all,
     ...(serverDays ? { serverDays } : {}),
     ...(statuses ? { bookStatuses: statuses } : {}),
+    ...(rest ? { favorites: rest.favorites, moodChecks: rest.checks } : {}),
   });
 }
 
@@ -948,6 +1039,9 @@ const SCREENS = {
   streak: createStreakScreen,
   library: createLibrary,
   book: createBook,
+  rest: createRest,
+  video: createVideo,
+  break: createBreak,
   auth: createAuth,
 };
 
@@ -956,6 +1050,7 @@ const TABS = [
   { screen: 'home', label: 'Главная', icon: IC.home },
   { screen: 'saved', label: 'Планы', icon: IC.bookmark },
   { screen: 'library', label: 'Книги', icon: IC.book },
+  { screen: 'rest', label: 'Отдых', icon: IC.cup },
   { screen: 'profile', label: 'Профиль', icon: IC.user },
 ];
 
@@ -967,6 +1062,9 @@ function screenKey(s) {
   if (s.screen === 'onb') return `onb-${s.onb}`;
   if (s.screen === 'calm') return `calm-${s.calmMode}`;
   if (s.screen === 'auth') return `auth-${s.auth.mode}`;
+  // Другое видео или другая книга — новый экран, а не обновление старого
+  if (s.screen === 'video') return `video-${s.videoId}`;
+  if (s.screen === 'book') return `book-${s.bookId}`;
   return s.screen;
 }
 
@@ -992,7 +1090,7 @@ function renderHeader() {
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
         h('span', { class: 'logo__word' }, 'Паника-режим'))
       : null,
-    ['chat', 'plan', 'profile-edit', 'streak', 'book'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['chat', 'plan', 'profile-edit', 'streak', 'book', 'video', 'break'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
     s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
     h('div', { class: 'header__spacer' }),
@@ -1009,7 +1107,11 @@ function renderTabbar() {
     type: 'button',
     'aria-current': t.screen === state.screen ? 'page' : null,
     dataset: { focus: `tab-${t.screen}` },
-    onClick: () => (t.screen === 'library' ? actions.openLibrary() : setState({ screen: t.screen })),
+    onClick: () => {
+      if (t.screen === 'library') return actions.openLibrary();
+      if (t.screen === 'rest') return actions.openRest();
+      return setState({ screen: t.screen });
+    },
   }, icon(t.icon, 22), h('span', {}, t.label))));
 }
 
@@ -1074,7 +1176,7 @@ function derived() {
   return {
     ...state,
     reduced: isReduced(),
-    stats: computeStats(plans),
+    stats: { ...computeStats(plans), mood: moodStats(state.moodChecks) },
     streak: streakView(plans),
     reminderTime: state.account.user ? state.account.profile?.reminder_time?.slice(0, 5) ?? null : state.reminderTime,
   };
@@ -1164,3 +1266,4 @@ document.addEventListener('keydown', (event) => {
 render();
 initAccounts();
 if (state.screen === 'library') actions.loadLibrary();
+if (state.screen === 'rest') actions.loadVideos();

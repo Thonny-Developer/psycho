@@ -6,6 +6,11 @@ import { getUser, supabaseConfig, createRateLimiter } from './_lib/auth.js';
 
 const rateLimit = createRateLimiter({ limit: 5 });
 
+/** Новый secret key — не JWT: его передают только в apikey, а старый service_role ещё и как Bearer. */
+export function serviceHeaders(key) {
+  return key.startsWith('sb_') ? { apikey: key } : { apikey: key, Authorization: `Bearer ${key}` };
+}
+
 export default async function handler(req, res, { fetchImpl = fetch } = {}) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -15,7 +20,8 @@ export default async function handler(req, res, { fetchImpl = fetch } = {}) {
   }
 
   const config = supabaseConfig();
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Старый service_role (eyJ…) или новый secret key (sb_secret_…)
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
   if (!config || !serviceKey) {
     console.error('[account] Supabase is not configured');
     return res.status(503).json({ error: 'Сервис временно недоступен' });
@@ -33,7 +39,7 @@ export default async function handler(req, res, { fetchImpl = fetch } = {}) {
   try {
     const response = await fetchImpl(`${config.url}/auth/v1/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'DELETE',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      headers: serviceHeaders(serviceKey),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok && response.status !== 404) {

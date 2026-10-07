@@ -1,6 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import handler from '../api/account.js';
+import handler, { serviceHeaders } from '../api/account.js';
+import { supabaseConfig } from '../api/_lib/auth.js';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.account-test-token-long.signature';
 const SERVICE = 'service-role-secret';
@@ -12,7 +13,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const k of ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) delete process.env[k];
+  for (const k of ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY']) delete process.env[k];
 });
 
 function call({ method = 'DELETE', token = TOKEN, fetchImpl }) {
@@ -75,4 +76,12 @@ test('сбой Supabase — короткая ошибка без деталей'
   console.error = orig;
   assert.equal(res.code, 502);
   assert.match(res.data.error, /Это не ты/);
+});
+
+test('новые ключи Supabase: publishable вместо anon, secret только в apikey', () => {
+  delete process.env.SUPABASE_ANON_KEY;
+  process.env.SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test';
+  assert.equal(supabaseConfig().anonKey, 'sb_publishable_test');
+  assert.deepEqual(serviceHeaders('sb_secret_test'), { apikey: 'sb_secret_test' });
+  assert.deepEqual(serviceHeaders('eyJold'), { apikey: 'eyJold', Authorization: 'Bearer eyJold' });
 });

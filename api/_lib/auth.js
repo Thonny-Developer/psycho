@@ -7,10 +7,13 @@ const USER_CACHE_MS = 60_000;
 const VERIFY_TIMEOUT_MS = 5_000;
 const userCache = new Map(); // sha256(токен) -> { id, until }
 
-/** Настройки Supabase или null, если аккаунты не настроены. */
+/**
+ * Настройки Supabase или null, если аккаунты не настроены.
+ * Подходит и старый anon key (eyJ…), и новый publishable key (sb_publishable_…).
+ */
 export function supabaseConfig() {
   const url = process.env.SUPABASE_URL ?? '';
-  const anonKey = process.env.SUPABASE_ANON_KEY ?? '';
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '';
   if (!/^https:\/\/[a-z0-9.-]+$/i.test(url.replace(/\/$/, '')) || !anonKey) return null;
   return { url: url.replace(/\/$/, ''), anonKey };
 }
