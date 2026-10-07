@@ -65,6 +65,20 @@ export function createConfirmSheet({ onCancel, onConfirm }) {
       h('button', { class: 'btn btn--outline-warn', type: 'button', onClick: onConfirm }, 'Удалить всё'))));
 }
 
+/** Перенос планов гостя в аккаунт: спрашиваем один раз. */
+export function createImportSheet({ count, busy, onImport, onSkip }) {
+  const move = h('button', { class: 'btn', type: 'button', disabled: busy, 'aria-busy': String(busy), onClick: onImport },
+    h('span', { class: 'btn__spinner', 'aria-hidden': 'true' }), busy ? 'Переношу…' : 'Перенести');
+  return h('div', { class: 'sheet-overlay', ref: (el) => { el.focusTarget = move; } },
+    h('div', { class: 'sheet', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'import-title', 'aria-describedby': 'import-text' },
+      h('h2', { id: 'import-title' }, 'Перенести планы в аккаунт?'),
+      h('p', { id: 'import-text', class: 'text-16 muted' },
+        `На этом устройстве есть планы без аккаунта: ${count}. Если перенести, они будут доступны везде, где ты войдёшь. Дубли не появятся.`),
+      h('div', { class: 'sheet__actions' },
+        move,
+        h('button', { class: 'btn btn--text', type: 'button', disabled: busy, onClick: onSkip }, 'Не переносить'))));
+}
+
 export function createToast(toast, onAction) {
   return h('div', { class: 'toast', role: 'status' },
     icon(toast.icon ?? IC.info, 20, { strokeWidth: 2 }),

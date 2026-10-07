@@ -31,8 +31,16 @@ export function validateName(value) {
 }
 
 /** Ошибка Supabase Auth → спокойный текст. Детали сервера наружу не выводим. */
+// Старые версии Supabase Auth отдают ошибку без кода, только текстом
+const MESSAGE_CODES = [
+  [/invalid login credentials/i, 'invalid_credentials'],
+  [/already registered|already exists/i, 'user_already_exists'],
+  [/email not confirmed/i, 'email_not_confirmed'],
+  [/rate limit/i, 'over_request_rate_limit'],
+];
+
 export function authErrorMessage(error) {
-  const code = error?.code ?? '';
+  const code = error?.code || MESSAGE_CODES.find(([re]) => re.test(error?.message ?? ''))?.[1] || '';
   const status = error?.status ?? 0;
   const name = error?.name ?? '';
 

@@ -9,8 +9,26 @@ import {
   plural,
 } from './plan.js';
 import { getFallbackSteps, FALLBACK_TITLE } from './fallback.js';
-import { requestReply, requestPlan, requestSplit, describeError } from './api.js';
-import { createStorage, DEFAULT_SETTINGS, MAX_SCENARIOS } from './storage.js';
+import { requestReply, requestPlan, requestSplit, describeError, setTokenProvider } from './api.js';
+import { createStorage, userPrefix, DEFAULT_SETTINGS, MAX_SCENARIOS } from './storage.js';
+import {
+  loadConfig,
+  peekSessionUser,
+  hasAuthRedirect,
+  onAuthChange,
+  getAccessToken,
+  signIn,
+  signUp,
+  signInWithGoogle,
+  resetPassword,
+  updatePassword,
+  signOut,
+  fetchProfile,
+  updateProfile,
+  currentTimezone,
+} from './auth.js';
+import { createSync } from './sync.js';
+import { validateEmail, validatePassword, validateName, guestPlansForImport } from './account.js';
 import { isCrisis, makeMessage, CRISIS_REPLY, MESSAGE_MAX } from './chat.js';
 import { greetingFor, GROUND } from './content.js';
 import { IC } from './icons.js';
@@ -23,9 +41,15 @@ import { createPlanScreen } from './screens/plan-screen.js';
 import { createDone } from './screens/done.js';
 import { createSaved } from './screens/saved.js';
 import { createSettings } from './screens/settings.js';
-import { createHelpDialog, createConfirmSheet, createToast } from './screens/overlays.js';
+import { createAuth } from './screens/auth.js';
+import { createHelpDialog, createConfirmSheet, createToast, createImportSheet } from './screens/overlays.js';
 
-const storage = createStorage();
+// У гостя и у каждого аккаунта своё пространство в localStorage, чтобы данные не смешивались.
+// Сохранённая сессия Supabase читается сразу, чтобы после перезагрузки не мелькали данные гостя.
+const guestStorage = createStorage();
+const restoredUser = peekSessionUser();
+let storage = restoredUser ? createStorage(undefined, { prefix: userPrefix(restoredUser.id) }) : guestStorage;
+let sync = null;
 const FONT_SCALE = { m: 1, l: 1.12, xl: 1.25 };
 const DONE_DELAY = 1100;
 
@@ -40,6 +64,7 @@ const els = {
   banner: $('net-banner'),
   stage: $('stage'),
   layers: $('layers'),
+  tabbar: $('tabbar'),
   themeColor: document.querySelector('meta[name="theme-color"]'),
 };
 
@@ -71,6 +96,13 @@ function baseState() {
     confirmClear: false,
     dataOpen: false,
     online: navigator.onLine !== false,
+    accountPromptSeen: false,
+    accountHintSeen: false,
+    showAccountHint: false,
+    account: { enabled: null, user: null, profile: null, expired: false, pending: 0, signingOut: false },
+    auth: { mode: 'welcome', busy: false, errors: {}, email: '', sentKind: null },
+    authReturn: 'home',
+    importOffer: null, // { count, busy }
   };
 }
 
@@ -79,6 +111,7 @@ function initialState() {
   const prefs = storage.loadPrefs();
   const session = storage.loadSession();
   Object.assign(state, prefs, { scenarios: storage.listScenarios() });
+  if (restoredUser) state.account = { ...state.account, user: restoredUser };
 
   if (session) {
     Object.assign(state, session);
@@ -107,8 +140,15 @@ function isReduced(s = state) {
 
 let storageWarned = false;
 
+let lastSyncedPlan = state.plan;
+
 function persist() {
-  const prefs = storage.savePrefs({ onboarded: state.onboarded, settings: state.settings });
+  const prefs = storage.savePrefs({
+    onboarded: state.onboarded,
+    settings: state.settings,
+    accountPromptSeen: state.accountPromptSeen,
+    accountHintSeen: state.accountHintSeen,
+  });
   const keep = ['calm', 'chat', 'plan', 'saved', 'settings', 'done'];
   storage.saveSession({
     screen: keep.includes(state.screen) ? state.screen : state.onboarded ? 'home' : 'onb',
@@ -118,6 +158,10 @@ function persist() {
     planFrom: state.planFrom,
     calmMode: state.calmMode,
   });
+  // Любое изменение текущего плана аккаунта уходит на сервер: по нему считается серия
+  if (sync && state.planStatus === 'ready' && state.plan && state.plan !== lastSyncedPlan) sync.savePlan(state.plan);
+  lastSyncedPlan = state.plan;
+
   if (!prefs.ok && !storageWarned) {
     storageWarned = true;
     showToast('Браузер не даёт сохранять данные. После перезагрузки всё начнётся заново.', IC.info);
@@ -175,7 +219,10 @@ function afterToggle(before, plan) {
     doneTimer = setTimeout(() => {
       if (state.screen !== 'plan' || state.plan?.id !== plan.id || !getProgress(state.plan).complete) return;
       const saved = storage.addScenario(state.plan);
-      setState({ screen: 'done', scenarios: saved.scenarios });
+      if (saved.ok) sync?.setSaved(saved.scenarios.find((p) => p.id === state.plan.id) ?? state.plan, true);
+      // Гостю после первого выполненного плана один раз мягко предлагаем аккаунт
+      const hint = state.account.enabled === true && !state.account.user && !state.accountHintSeen;
+      setState({ screen: 'done', scenarios: saved.scenarios, showAccountHint: hint, accountHintSeen: state.accountHintSeen || hint });
     }, DONE_DELAY);
   } else if (after.done !== before.done) {
     announce(`Сделано ${after.done} из ${after.total}`);
@@ -185,7 +232,11 @@ function afterToggle(before, plan) {
 const actions = {
   nextOnboarding: () => setState({ onb: Math.min(2, state.onb + 1) }),
   skipOnboarding: () => setState({ onb: 2 }),
-  finishOnboarding: () => setState({ onboarded: true, screen: 'home', onb: 0 }),
+  finishOnboarding() {
+    // Если аккаунты настроены, один раз спрашиваем, сохранять ли прогресс
+    const ask = state.account.enabled === true && !state.account.user && !state.accountPromptSeen;
+    setState({ onboarded: true, onb: 0, screen: ask ? 'auth' : 'home', auth: { ...baseState().auth, mode: 'welcome' }, authReturn: 'home' });
+  },
   replayOnboarding: () => setState({ screen: 'onb', onb: 0 }),
 
   goHome: () => setState({ screen: 'home' }),
@@ -363,6 +414,7 @@ const actions = {
 
   savePlan() {
     const result = storage.addScenario(state.plan);
+    if (result.ok) sync?.setSaved(result.scenarios.find((p) => p.id === state.plan.id) ?? state.plan, true);
     if (result.ok) showToast('Сохранено в «Мои сценарии»', IC.check);
     else showToast(STORAGE_ERRORS[result.error], IC.info);
     setState({ scenarios: result.scenarios }, { focusKey: 'save' });
@@ -395,8 +447,10 @@ const actions = {
     }
     // Фокус переходит на соседний сценарий, а если список опустел — на заголовок
     const next = result.scenarios[Math.min(index, result.scenarios.length - 1)];
+    sync?.setSaved(item, false);
     showToast('Сценарий удалён', IC.trash, 'Вернуть', () => {
       const restored = storage.restoreScenario(item);
+      if (restored.ok) sync?.setSaved(item, true);
       clearTimeout(toastTimer);
       setState({ scenarios: restored.scenarios, toast: null }, { focusKey: `open-${item.id}` });
     });
@@ -409,6 +463,116 @@ const actions = {
   askClear: () => setState({ confirmClear: true }),
 
   openHelp: (reason = 'manual') => setState({ helpOpen: true, helpReason: reason }),
+
+  // ---------- Аккаунт ----------
+
+  openAuth(mode = 'login') {
+    listenAuth();
+    setState({ screen: 'auth', auth: { ...baseState().auth, mode }, authReturn: state.screen === 'auth' ? state.authReturn : state.screen, showAccountHint: false });
+  },
+
+  setAuthMode(mode, email = state.auth.email) {
+    setState({ auth: { ...baseState().auth, mode, email: String(email ?? '').trim() } });
+  },
+
+  closeAuth() {
+    if (state.auth.mode === 'welcome') return actions.continueAsGuest();
+    setState({ screen: state.authReturn ?? 'home' });
+  },
+
+  continueAsGuest: () => setState({ screen: 'home', accountPromptSeen: true }),
+
+  dismissAccountHint: () => setState({ showAccountHint: false }),
+
+  async submitAuth(kind, values) {
+    if (state.auth.busy) return;
+    const email = String(values.email ?? '').trim();
+    const errors = {};
+    if (kind !== 'reset') {
+      const e = validateEmail(email);
+      if (e) errors.email = e;
+    }
+    if (kind === 'login' && !values.password) errors.password = 'Впиши пароль';
+    if (kind === 'signup' || kind === 'reset') {
+      const e = validatePassword(values.password);
+      if (e) errors.password = e;
+    }
+    if (kind === 'signup') {
+      const e = validateName(values.name);
+      if (e) errors.name = e;
+    }
+    if (Object.keys(errors).length) return setState({ auth: { ...state.auth, email, errors } });
+
+    listenAuth();
+    setState({ auth: { ...state.auth, email, busy: true, errors: {} } });
+    const request = {
+      login: () => signIn({ email, password: values.password }),
+      signup: () => signUp({ email, password: values.password, name: String(values.name ?? '').trim() }),
+      forgot: () => resetPassword(email),
+      reset: () => updatePassword(values.password),
+    }[kind];
+    const result = await request();
+
+    if (!result.ok) {
+      const field = result.code === 'user_already_exists' || result.code === 'email_exists' ? 'email'
+        : result.code === 'weak_password' || result.code === 'same_password' ? 'password' : 'form';
+      return setState({ auth: { ...state.auth, busy: false, errors: { [field]: result.error } } });
+    }
+
+    if (kind === 'forgot') return setState({ auth: { ...state.auth, busy: false, mode: 'sent', sentKind: 'reset' } });
+    if (kind === 'signup' && !result.data?.session) {
+      return setState({ auth: { ...state.auth, busy: false, mode: 'sent', sentKind: 'confirm' } });
+    }
+    if (kind === 'reset') {
+      showToast('Пароль обновлён', IC.check);
+      return setState({ screen: 'home', auth: baseState().auth });
+    }
+    // Вход и регистрация без подтверждения почты: дальше всё сделает событие SIGNED_IN
+    setState({ auth: { ...state.auth, busy: false } });
+  },
+
+  async signInWithGoogle() {
+    if (state.auth.busy) return;
+    listenAuth();
+    setState({ auth: { ...state.auth, busy: true, errors: {} } });
+    const result = await signInWithGoogle();
+    // При успехе браузер уходит на страницу Google; сюда попадаем только с ошибкой
+    if (!result.ok) setState({ auth: { ...state.auth, busy: false, errors: { form: result.error } } });
+  },
+
+  async signOut() {
+    if (state.account.signingOut) return;
+    if (sync?.pending && !navigator.onLine) {
+      showToast('Последние изменения ещё не дошли до аккаунта. Выйти можно, когда появится интернет.', IC.wifiOff);
+      return render();
+    }
+    setState({ account: { ...state.account, signingOut: true } });
+    await sync?.flush();
+    await signOut();
+    leaveAccount('signout');
+  },
+
+  async acceptImport() {
+    if (!state.importOffer || state.importOffer.busy || !sync) return;
+    setState({ importOffer: { ...state.importOffer, busy: true } });
+    const items = guestPlansForImport({ scenarios: guestStorage.listScenarios(), current: guestStorage.loadSession()?.plan });
+    const result = await sync.importPlans(items);
+    if (!result.ok) {
+      setState({ importOffer: { ...state.importOffer, busy: false } });
+      showToast('Перенести не получилось. Это не ты — попробуем позже, предложу снова.', IC.info);
+      return render();
+    }
+    await markImported();
+    await refreshFromServer();
+    setState({ importOffer: null });
+    showToast(`Перенесено планов: ${items.length}`, IC.check);
+    render();
+  },
+
+  async declineImport() {
+    setState({ importOffer: null });
+    await markImported();
+  },
 };
 
 async function reply() {
@@ -444,6 +608,155 @@ async function reply() {
   }
 }
 
+// ---------- Аккаунт: вход, выход, синхронизация ----------
+
+let authListening = false;
+
+function listenAuth() {
+  if (authListening) return;
+  authListening = true;
+  onAuthChange(handleAuthEvent).then((ok) => {
+    if (!ok) authListening = false;
+  });
+}
+
+function handleAuthEvent(event, session) {
+  if (event === 'PASSWORD_RECOVERY') {
+    if (session?.user) enterAccount(session.user, { silent: true });
+    return setState({ screen: 'auth', auth: { ...baseState().auth, mode: 'reset' }, authReturn: 'home' });
+  }
+  if (session?.user && ['INITIAL_SESSION', 'SIGNED_IN', 'USER_UPDATED'].includes(event)) {
+    return enterAccount(session.user);
+  }
+  if (event === 'INITIAL_SESSION' && !session && state.account.user) return leaveAccount('expired');
+  if (event === 'SIGNED_OUT' && state.account.user && !state.account.signingOut) leaveAccount('expired');
+}
+
+/** Состояние из хранилища текущего пространства: сценарии, разговор и план. */
+function dataFromStorage() {
+  const session = storage.loadSession();
+  return {
+    scenarios: storage.listScenarios(),
+    messages: session?.messages ?? [],
+    type: session?.type ?? null,
+    plan: session?.plan ?? null,
+    planStatus: session?.plan ? 'ready' : 'idle',
+    planFrom: session?.planFrom ?? 'chat',
+    conversation: state.conversation + 1,
+    ai: 'idle',
+    split: {},
+  };
+}
+
+async function enterAccount(user, { silent = false } = {}) {
+  const switching = state.account.user?.id !== user.id || storage === guestStorage;
+  if (switching) {
+    sync?.stop();
+    storage = createStorage(undefined, { prefix: userPrefix(user.id) });
+  }
+  if (switching || !sync || state.account.expired) {
+    sync = createSync({
+      storage,
+      userId: user.id,
+      onExpired: () => leaveAccount('expired'),
+      onChange: () => {
+        if (state.account.pending !== sync?.pending) setState({ account: { ...state.account, pending: sync?.pending ?? 0 } });
+      },
+    });
+  }
+
+  const fromAuth = state.screen === 'auth';
+  const patch = { account: { ...state.account, enabled: true, user: { id: user.id, email: user.email ?? '' }, expired: false, signingOut: false } };
+  if (switching) Object.assign(patch, dataFromStorage());
+  if (fromAuth || switching) {
+    Object.assign(patch, {
+      screen: fromAuth || !['home', 'saved', 'settings', 'calm'].includes(state.screen) ? 'home' : state.screen,
+      auth: baseState().auth,
+      accountPromptSeen: true,
+    });
+  }
+  lastSyncedPlan = patch.plan ?? state.plan;
+  setState(patch);
+  if (fromAuth && !silent) showToast('Вход выполнен. Планы теперь в аккаунте', IC.check);
+  if (fromAuth) render();
+
+  await sync.flush();
+  await refreshFromServer();
+  await loadProfile(user.id);
+}
+
+async function refreshFromServer() {
+  const pulled = await sync?.pull();
+  if (!pulled) return;
+  storage.replaceScenarios(pulled.scenarios);
+  setState({ scenarios: storage.listScenarios() });
+}
+
+async function loadProfile(userId) {
+  const result = await fetchProfile(userId);
+  if (!result.ok || state.account.user?.id !== userId) return;
+  let profile = result.data;
+  // День серии считается по часовому поясу профиля: держим его в актуальном состоянии
+  const tz = currentTimezone();
+  if (profile.timezone !== tz) {
+    const updated = await updateProfile(userId, { timezone: tz });
+    if (updated.ok) profile = updated.data;
+  }
+  const guestPlans = guestPlansForImport({ scenarios: guestStorage.listScenarios(), current: guestStorage.loadSession()?.plan });
+  const offer = !profile.guest_imported_at && guestPlans.length && !importAsked.has(userId);
+  setState({
+    account: { ...state.account, profile },
+    importOffer: offer ? { count: guestPlans.length, busy: false } : state.importOffer,
+  });
+}
+
+// Если отметить перенос на сервере не получилось (нет сети), в этой вкладке больше не спрашиваем
+const importAsked = new Set();
+
+async function markImported() {
+  const userId = state.account.user?.id;
+  if (!userId) return;
+  importAsked.add(userId);
+  const result = await updateProfile(userId, { guest_imported_at: new Date().toISOString() });
+  if (result.ok) setState({ account: { ...state.account, profile: result.data } });
+}
+
+/**
+ * signout — человек вышел сам: кеш аккаунта на этом устройстве стираем.
+ * expired — сессия закончилась: данные остаются, просим войти снова.
+ */
+function leaveAccount(reason) {
+  if (reason === 'expired') {
+    if (state.account.expired) return;
+    setState({ account: { ...state.account, expired: true } });
+    showToast('Сессия закончилась. Войди снова — данные на месте', IC.info, 'Войти', () => actions.openAuth('login'));
+    return render();
+  }
+
+  sync?.stop();
+  sync = null;
+  if (storage !== guestStorage) storage.clearAll({ withPrefs: false });
+  storage = guestStorage;
+  lastSyncedPlan = guestStorage.loadSession()?.plan ?? null;
+  setState({
+    ...dataFromStorage(),
+    // Вышли из профиля — там и остаёмся, уже с карточкой гостя
+    screen: state.screen === 'settings' ? 'settings' : 'home',
+    importOffer: null,
+    account: { ...baseState().account, enabled: state.account.enabled },
+  });
+  showToast('Выход выполнен', IC.logout);
+  render();
+}
+
+setTokenProvider(() => (state.account.user && !state.account.expired ? getAccessToken() : Promise.resolve(null)));
+
+async function initAccounts() {
+  const config = await loadConfig();
+  setState({ account: { ...state.account, enabled: Boolean(config.accounts) } });
+  if (config.accounts && (restoredUser || hasAuthRedirect())) listenAuth();
+}
+
 function closeHelp() {
   setState({ helpOpen: false });
 }
@@ -453,10 +766,10 @@ function helpBreathe() {
 }
 
 function clearAll() {
-  storage.clearAll();
+  guestStorage.clearAll();
   clearTimeout(doneTimer);
   clearTimeout(toastTimer);
-  state = { ...baseState(), conversation: state.conversation + 1 };
+  state = { ...baseState(), conversation: state.conversation + 1, account: { ...baseState().account, enabled: state.account.enabled } };
   render();
   announce('Все данные удалены');
 }
@@ -472,7 +785,15 @@ const SCREENS = {
   done: createDone,
   saved: createSaved,
   settings: createSettings,
+  auth: createAuth,
 };
+
+// Разделы нижней навигации. Остальные экраны — шаги одного сценария, там панель не нужна.
+const TABS = [
+  { screen: 'home', label: 'Главная', icon: IC.home },
+  { screen: 'saved', label: 'Планы', icon: IC.bookmark },
+  { screen: 'settings', label: 'Профиль', icon: IC.user },
+];
 
 let current = null;
 let currentKey = '';
@@ -481,6 +802,7 @@ let firstRender = true;
 function screenKey(s) {
   if (s.screen === 'onb') return `onb-${s.onb}`;
   if (s.screen === 'calm') return `calm-${s.calmMode}`;
+  if (s.screen === 'auth') return `auth-${s.auth.mode}`;
   return s.screen;
 }
 
@@ -497,22 +819,34 @@ function applyEnvironment() {
 
 function renderHeader() {
   const s = state.screen;
+  const tab = TABS.some((t) => t.screen === s);
   const button = (path, label, onClick, focus) =>
     h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, dataset: { focus }, onClick }, icon(path, 22));
 
   replaceKeepFocus(els.header, [
-    s === 'home' || s === 'onb'
+    tab || s === 'onb'
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
-        h('span', { class: 'logo__mark', 'aria-hidden': 'true' }),
         h('span', { class: 'logo__word' }, 'Паника-режим'))
       : null,
-    ['chat', 'plan', 'saved', 'settings'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
+    ['chat', 'plan'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
+    s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
     h('div', { class: 'header__spacer' }),
-    s === 'home' ? button(IC.sliders, 'Настройки', actions.openSettings, 'settings') : null,
     h('button', { class: 'help-btn', type: 'button', dataset: { focus: 'help' }, onClick: () => actions.openHelp('manual') },
       icon(IC.heart, 18, { strokeWidth: 1.9 }), 'Живая помощь'),
   ]);
+}
+
+function renderTabbar() {
+  const visible = TABS.some((t) => t.screen === state.screen);
+  els.tabbar.hidden = !visible;
+  if (!visible) return;
+  replaceKeepFocus(els.tabbar, TABS.map((t) => h('button', {
+    type: 'button',
+    'aria-current': t.screen === state.screen ? 'page' : null,
+    dataset: { focus: `tab-${t.screen}` },
+    onClick: () => setState({ screen: t.screen }),
+  }, icon(t.icon, 22), h('span', {}, t.label))));
 }
 
 function renderBanner() {
@@ -543,7 +877,9 @@ let layerKey = '';
 let returnFocus = null;
 
 function renderLayers() {
-  const modalKey = state.helpOpen ? `help-${state.helpReason}` : state.confirmClear ? 'confirm' : '';
+  const modalKey = state.helpOpen ? `help-${state.helpReason}`
+    : state.confirmClear ? 'confirm'
+      : state.importOffer ? `import-${state.importOffer.busy}` : '';
   const key = `${modalKey}|${state.toast?.key ?? ''}`;
   if (key === layerKey) return;
   const hadModal = Boolean(layerKey.split('|')[0]);
@@ -558,7 +894,9 @@ function renderLayers() {
       ? createHelpDialog({ crisis: state.helpReason === 'crisis', onClose: closeHelp, onBreathe: helpBreathe })
       : state.confirmClear
         ? createConfirmSheet({ onCancel: () => setState({ confirmClear: false }), onConfirm: clearAll })
-        : null;
+        : state.importOffer
+          ? createImportSheet({ ...state.importOffer, onImport: actions.acceptImport, onSkip: actions.declineImport })
+          : null;
   }
   els.layers.replaceChildren(
     ...[modal, state.toast ? createToast(state.toast, () => state.toast?.action?.()) : null].filter(Boolean),
@@ -575,6 +913,7 @@ function renderLayers() {
 function render(options) {
   applyEnvironment();
   renderHeader();
+  renderTabbar();
   renderBanner();
   renderScreen(options);
   renderLayers();
@@ -590,8 +929,10 @@ darkQuery.addEventListener?.('change', () => render());
 motionQuery.addEventListener?.('change', () => render());
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
-  if (state.confirmClear) setState({ confirmClear: false });
+  if (state.importOffer && !state.importOffer.busy) actions.declineImport();
+  else if (state.confirmClear) setState({ confirmClear: false });
   else if (state.helpOpen) closeHelp();
 });
 
 render();
+initAccounts();

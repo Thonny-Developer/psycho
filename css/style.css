@@ -302,27 +302,8 @@ textarea::placeholder {
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding-left: 4px;
   min-width: 0;
-}
-
-.logo__mark {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  display: grid;
-  place-items: center;
-}
-
-.logo__mark::after {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
 }
 
 .logo__word {
@@ -2325,4 +2306,251 @@ textarea::placeholder {
 .noscript {
   padding: 24px;
   font-family: var(--sans);
+}
+
+/* ===== Вход и регистрация ===== */
+
+.auth-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px var(--pad) 32px;
+}
+
+.auth-body--center {
+  flex: 1;
+  align-items: center;
+  justify-content: safe center;
+  text-align: center;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-size: calc(16px * var(--fs));
+  font-weight: 600;
+}
+
+.field__optional {
+  font-size: calc(14px * var(--fs));
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 18px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(17px * var(--fs));
+  transition: border-color .3s, box-shadow .3s;
+}
+
+.input:hover {
+  border-color: var(--text-2);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--warn);
+}
+
+.input[readonly] {
+  opacity: .7;
+}
+
+.field__hint,
+.field__error {
+  font-size: calc(14px * var(--fs));
+  line-height: 1.4;
+}
+
+.field__hint {
+  color: var(--text-2);
+}
+
+.field__error {
+  color: var(--warn);
+}
+
+.field__hint:empty,
+.field__error:empty {
+  display: none;
+}
+
+.btn__spinner {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: pm-spin .8s linear infinite;
+}
+
+[aria-busy="true"] > .btn__spinner {
+  display: inline-block;
+}
+
+@keyframes pm-spin { to { transform: rotate(360deg); } }
+
+/* В режиме меньших анимаций спиннер всё равно крутится медленно: иначе не видно, что идёт загрузка */
+[data-reduced="true"] .btn__spinner {
+  animation: pm-spin 2s linear infinite !important;
+}
+
+.btn--wide {
+  width: 100%;
+  min-height: 52px;
+  font-size: calc(16px * var(--fs));
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(14px * var(--fs));
+  color: var(--text-2);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-links {
+  display: flex;
+  justify-content: flex-start;
+  margin: -6px 0 0 -6px;
+}
+
+.auth-switch {
+  text-align: center;
+  color: var(--text-2);
+}
+
+.auth-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.auth-note svg {
+  flex: none;
+  margin-top: 2px;
+  stroke: var(--accent);
+}
+
+.account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.account-card__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.account-card__name {
+  font-size: calc(18px * var(--fs));
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sync-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-note svg {
+  flex: none;
+  stroke: currentColor;
+}
+
+/* ===== Нижняя навигация ===== */
+
+.tabbar {
+  flex: none;
+  display: flex;
+  justify-content: space-around;
+  gap: 2px;
+  padding: 4px max(8px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.tabbar button {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: calc(12px * var(--fs));
+  font-weight: 500;
+  transition: color .3s, background .3s;
+}
+
+.tabbar button:hover {
+  color: var(--text);
+}
+
+.tabbar button[aria-current="page"] {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.tabbar button[aria-current="page"] svg {
+  stroke: var(--accent);
+}
+
+.tabbar span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-hint {
+  width: 100%;
+  max-width: 420px;
+  padding: 18px;
+  gap: 12px;
+  text-align: center;
 }

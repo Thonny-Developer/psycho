@@ -33,6 +33,7 @@ test('ошибки входа звучат спокойно и без детал
   assert.match(authErrorMessage({ code: 'user_already_exists', status: 422 }), /уже есть аккаунт/);
   assert.match(authErrorMessage({ name: 'AuthRetryableFetchError', status: 0 }), /Нет связи/);
   assert.match(authErrorMessage({ code: 'over_email_send_rate_limit', status: 429 }), /Спам/);
+  assert.match(authErrorMessage({ status: 400, message: 'Invalid login credentials' }), /не подошли/, 'старый формат без кода');
   const unknown = authErrorMessage({ code: 'something_internal', status: 500, message: 'secret details' });
   assert.ok(!unknown.includes('secret'));
   assert.match(unknown, /Это не ты/);
