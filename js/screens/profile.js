@@ -226,7 +226,7 @@ export function createProfile({ actions }) {
             h('span', {}, 'Удалить аккаунт'))),
         h('div', { class: 'card card--sand' },
           h('p', { class: 'serif', style: { fontSize: 'calc(18px * var(--fs))', lineHeight: '1.4' } }, 'Я не психолог и не заменяю помощь специалиста.'),
-          h('p', { class: 'text-14 muted' }, 'Паника-режим помогает успокоиться и структурировать задачи. Если тяжело по-настоящему — кнопка «Живая помощь» наверху.'),
+          h('p', { class: 'text-14 muted' }, 'Kero Psycho Helper помогает успокоиться и структурировать задачи. Если тяжело по-настоящему — кнопка «Живая помощь» наверху.'),
           h('button', { class: 'link', type: 'button', style: { alignSelf: 'flex-start', padding: '0 4px' }, dataset: { focus: 'replay' }, onClick: actions.replayOnboarding },
             'Показать знакомство заново')),
       ]);

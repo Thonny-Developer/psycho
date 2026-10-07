@@ -24,7 +24,7 @@ export function computeStats(plans) {
 /** Всё, что приложение знает о человеке, в одном JSON. */
 export function buildExport({ account = null, profile = null, settings, plans, conversation = [], now = new Date() }) {
   return {
-    app: 'Паника-режим',
+    app: 'Kero Psycho Helper',
     format: 1,
     exported_at: now.toISOString(),
     account: account
@@ -60,5 +60,5 @@ export function buildExport({ account = null, profile = null, settings, plans, c
 }
 
 export function exportFileName(now = new Date()) {
-  return `panika-rezhim-${now.toISOString().slice(0, 10)}.json`;
+  return `kero-psycho-helper-${now.toISOString().slice(0, 10)}.json`;
 }

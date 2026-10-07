@@ -1,4 +1,4 @@
-# Паника-режим
+# Kero Psycho Helper
 
 Веб-приложение для студента, у которого навалилось всё сразу: горит дедлайн, завтра экзамен, висит долг или сломался код. Сначала оно помогает успокоиться, потом выслушивает и в конце раскладывает завал на 3–7 маленьких шагов с оценкой времени.
 
@@ -76,7 +76,7 @@ npm test
 
 1. Создай проект на [supabase.com](https://supabase.com).
 2. Примени миграции из `supabase/migrations/` по порядку: в панели SQL Editor вставь и выполни каждый файл, либо через CLI `supabase link` и `supabase db push`.
-3. Задай в Vercel переменную `APP_URL` — публичный адрес приложения, например `https://panika.vercel.app` (без слеша в конце). Если её нет, берётся домен продакшена Vercel. На этот адрес ведут ссылки из писем и возврат после входа через Google.
+3. Задай в Vercel переменную `APP_URL` — публичный адрес приложения, например `https://kero-psycho-helper.vercel.app` (без слеша в конце). Если её нет, берётся домен продакшена Vercel. На этот адрес ведут ссылки из писем и возврат после входа через Google.
 4. Authentication → URL Configuration в Supabase: в **Site URL** тот же адрес, что в `APP_URL`, в **Redirect URLs** — `https://<твой домен>/**` и `http://localhost:3000/**` для `vercel dev`. Это обязательно: адрес из запроса Supabase принимает, только если он есть в Redirect URLs, а иначе подставляет Site URL. По умолчанию это `http://localhost:3000`, поэтому без этой настройки письма и ведут на localhost.
 5. Authentication → Providers → Email: включено. Подтверждение почты можно оставить: после регистрации приложение покажет экран «Проверь почту».
 6. Вход через Google: в Google Cloud Console создай OAuth Client (Web), в Authorized redirect URIs добавь `https://<project>.supabase.co/auth/v1/callback`. Client ID и Secret вставь в Supabase → Providers → Google.

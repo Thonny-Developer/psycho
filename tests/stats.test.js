@@ -40,5 +40,5 @@ test('экспорт: всё нужное и ничего лишнего', () =>
   assert.equal(data.plans[0].steps[1].substeps.length, 2);
   assert.deepEqual(data.conversation, [{ role: 'помощник', text: 'Привет' }, { role: 'я', text: 'Курсовая' }]);
   assert.equal(buildExport({ settings: {}, plans: [] }).account, null);
-  assert.equal(exportFileName(new Date('2026-10-07T10:00:00Z')), 'panika-rezhim-2026-10-07.json');
+  assert.equal(exportFileName(new Date('2026-10-07T10:00:00Z')), 'kero-psycho-helper-2026-10-07.json');
 });

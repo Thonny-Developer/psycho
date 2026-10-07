@@ -1095,7 +1095,10 @@ function renderHeader() {
   replaceKeepFocus(els.header, [
     tab || s === 'onb'
       ? h('div', { class: `logo${s === 'onb' ? '' : ' logo--compact'}` },
-        h('span', { class: 'logo__word' }, 'Паника-режим'))
+        h('span', { class: 'logo__word' },
+          // На узком экране видно короткое «Kero», а скринридер читает полное название
+          h('span', { class: 'logo__full' }, 'Kero Psycho Helper'),
+          h('span', { class: 'logo__short', 'aria-hidden': 'true' }, 'Kero')))
       : null,
     ['chat', 'plan', 'profile-edit', 'streak', 'book', 'video', 'break'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,

@@ -314,16 +314,23 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-@container (max-width: 379px) {
-  .logo--compact .logo__word {
-    display: none;
-  }
+.logo__short {
+  display: none;
 }
 
-/* На самых узких экранах рядом с «Живой помощью» слово не помещается даже в онбординге */
-@container (max-width: 339px) {
-  .logo__word {
-    display: none;
+/* На узких экранах полное название рядом с «Живой помощью» не помещается */
+@container (max-width: 379px) {
+  .logo__full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .logo__short {
+    display: inline;
   }
 }
 
