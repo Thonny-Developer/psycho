@@ -1,4 +1,5 @@
-import { validateSteps, PLAN_LIMITS, SUBSTEP_LIMITS } from './plan.js';
+import { validatePlan, validateSteps, SUBSTEP_LIMITS } from './plan.js';
+import { toApiMessages, validateReply } from './chat.js';
 
 const ENDPOINT = '/api/plan';
 // Чуть больше серверного таймаута к Mistral (15 с), чтобы сервер успел вернуть свою ошибку
@@ -15,8 +16,7 @@ export class PlanApiError extends Error {
   }
 }
 
-/** Запрашивает шаги плана или подшаги одного шага (если передан step). */
-export async function requestSteps({ type, description = '', step = null }) {
+async function post(payload) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new PlanApiError('offline', 'Нет интернета');
   }
@@ -29,7 +29,7 @@ export async function requestSteps({ type, description = '', step = null }) {
     response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(step ? { type, description, step } : { type, description }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
   } catch (error) {
@@ -53,8 +53,45 @@ export async function requestSteps({ type, description = '', step = null }) {
     if (response.status === 504) throw new PlanApiError('timeout', message);
     throw new PlanApiError('server', message);
   }
+  return data;
+}
 
-  const steps = validateSteps(data, step ? SUBSTEP_LIMITS : PLAN_LIMITS);
-  if (!steps) throw new PlanApiError('invalid', 'Сервис вернул непонятный ответ');
+function invalid() {
+  return new PlanApiError('invalid', 'Сервис вернул непонятный ответ');
+}
+
+/** Следующая реплика помощника в чате. */
+export async function requestReply({ type, messages }) {
+  const reply = validateReply(await post({ action: 'chat', type, messages: toApiMessages(messages) }));
+  if (!reply) throw invalid();
+  return reply;
+}
+
+/** План по разговору: { title, steps }. */
+export async function requestPlan({ type, messages }) {
+  const plan = validatePlan(await post({ action: 'plan', type, messages: toApiMessages(messages) }));
+  if (!plan) throw invalid();
+  return plan;
+}
+
+/** Подшаги для одного шага плана. */
+export async function requestSplit({ type, planTitle, step }) {
+  const data = await post({ action: 'split', type, planTitle, step: step.title, stepMinutes: step.minutes });
+  const steps = validateSteps(data, SUBSTEP_LIMITS);
+  if (!steps) throw invalid();
   return steps;
+}
+
+/** Короткое объяснение причины для пользователя. */
+export function describeError(error) {
+  switch (error?.kind) {
+    case 'offline':
+      return 'Сейчас нет сети.';
+    case 'timeout':
+      return 'AI долго не отвечал.';
+    case 'rate_limit':
+      return 'Слишком много запросов за минуту, подожди немного.';
+    default:
+      return 'Связаться с AI не получилось.';
+  }
 }

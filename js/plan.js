@@ -1,27 +1,31 @@
 // Чистая логика плана: без DOM и сети, общая для браузера, serverless-функции и тестов.
 
 export const PROBLEM_TYPES = {
-  deadline: 'Дедлайн по проекту',
+  deadline: 'Дедлайн горит',
   exam: 'Экзамен завтра',
   debt: 'Долг по предмету',
-  bug: 'Сломался код',
   topic: 'Не понимаю тему',
+  bug: 'Сломался код',
   all: 'Всё сразу',
 };
 
-export const DESCRIPTION_MAX = 300;
 export const STEP_TITLE_MAX = 160;
+export const PLAN_TITLE_MAX = 60;
 
 export const PLAN_LIMITS = { min: 3, max: 7 };
-export const SUBSTEP_LIMITS = { min: 2, max: 5 };
+export const SUBSTEP_LIMITS = { min: 2, max: 4 };
 
 export function isValidType(type) {
   return typeof type === 'string' && Object.hasOwn(PROBLEM_TYPES, type);
 }
 
+function cleanText(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
 /**
- * Проверяет ответ модели вида { steps: [{ title, minutes }] }.
- * Возвращает очищенный массив шагов или null, если ответ нельзя показывать.
+ * Проверяет шаги из ответа модели: { steps: [{ title, minutes }] }.
+ * Возвращает очищенный массив или null, если ответ нельзя показывать.
  * Лишние шаги сверх max отрезаются, слишком короткий список считается ошибкой.
  */
 export function validateSteps(data, { min, max } = PLAN_LIMITS) {
@@ -32,7 +36,8 @@ export function validateSteps(data, { min, max } = PLAN_LIMITS) {
   for (const raw of data.steps.slice(0, max)) {
     if (!raw || typeof raw !== 'object' || typeof raw.title !== 'string') return null;
 
-    const title = raw.title.replace(/\s+/g, ' ').trim();
+    // Модели любят ставить точку в конце пункта, в чек-листе она лишняя
+    const title = cleanText(raw.title).replace(/(?<!\.)\.$/, '');
     if (title.length < 3 || title.length > STEP_TITLE_MAX) return null;
 
     const minutes = Math.round(Number(raw.minutes));
@@ -41,6 +46,14 @@ export function validateSteps(data, { min, max } = PLAN_LIMITS) {
     steps.push({ title, minutes });
   }
   return steps;
+}
+
+/** Ответ на запрос плана: { title, steps }. Без заголовка план всё равно годится. */
+export function validatePlan(data) {
+  const steps = validateSteps(data, PLAN_LIMITS);
+  if (!steps) return null;
+  const title = cleanText(data.title).slice(0, PLAN_TITLE_MAX);
+  return { title, steps };
 }
 
 export function makeId() {
@@ -52,15 +65,17 @@ function makeStep({ title, minutes }) {
   return { id: makeId(), title, minutes, done: false, substeps: [] };
 }
 
-export function createPlan({ type, description = '', steps, source = 'api' }) {
-  return {
+export function createPlan({ type, title = '', steps, source = 'api', fallbackReason = null }) {
+  const plan = {
     id: makeId(),
     type,
-    description: description.trim(),
+    title: cleanText(title) || PROBLEM_TYPES[type] || 'План на сейчас',
     source,
     createdAt: Date.now(),
     steps: steps.map(makeStep),
   };
+  if (fallbackReason) plan.fallbackReason = fallbackReason;
+  return plan;
 }
 
 /** Прогресс считается по основным шагам, подшаги только помогают закрыть шаг. */
@@ -107,6 +122,19 @@ export function findStep(plan, stepId) {
   return plan?.steps.find((s) => s.id === stepId) ?? null;
 }
 
+/**
+ * Планы из первой версии приложения хранились без заголовка:
+ * берём его из описания ситуации или из названия типа.
+ */
+export function migratePlan(plan) {
+  if (!plan || typeof plan !== 'object' || typeof plan.title === 'string') return plan;
+  const description = typeof plan.description === 'string' ? cleanText(plan.description) : '';
+  const title = description
+    ? description.length > PLAN_TITLE_MAX ? `${description.slice(0, PLAN_TITLE_MAX - 1).trim()}…` : description
+    : PROBLEM_TYPES[plan.type] ?? 'План на сейчас';
+  return { ...plan, title };
+}
+
 /** Проверка формы плана при чтении из localStorage: битые данные не должны ломать интерфейс. */
 export function isPlanShape(plan) {
   const isItem = (s) =>
@@ -116,18 +144,19 @@ export function isPlanShape(plan) {
     plan && typeof plan === 'object' &&
     typeof plan.id === 'string' &&
     isValidType(plan.type) &&
-    typeof plan.description === 'string' &&
+    typeof plan.title === 'string' &&
     Array.isArray(plan.steps) && plan.steps.length > 0 &&
     plan.steps.every((s) => isItem(s) && Array.isArray(s.substeps) && s.substeps.every(isItem)),
   );
 }
 
+/** 45 -> «45 мин», 80 -> «1 ч 20 мин», 120 -> «2 ч» */
 export function formatMinutes(minutes) {
   if (!Number.isFinite(minutes)) return '';
-  if (minutes < 60) return `~${minutes} мин`;
+  if (minutes < 60) return `${minutes} мин`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return m ? `~${h} ч ${m} мин` : `~${h} ч`;
+  return m ? `${h} ч ${m} мин` : `${h} ч`;
 }
 
 export function totalMinutes(plan) {
