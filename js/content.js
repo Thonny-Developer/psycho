@@ -1,6 +1,5 @@
-// Тексты интерфейса и справочные данные. Номера помощи проверены по открытым источникам:
-// tengrinews.kz/kazakhstan_news/zvonit-kazahstantsam-nujna-psihologicheskaya-pomosch-525732/
-// informburo.kz/interview/kak-kontakt-centr-111-okazyvaet-pomoshh-kazaxstancam
+// Тексты интерфейса и справочные данные. Номер call-центра дан владельцем проекта,
+// линия 150 проверена по tengrinews.kz/kazakhstan_news/zvonit-kazahstantsam-nujna-psihologicheskaya-pomosch-525732/
 
 import { IC } from './icons.js';
 import { PROBLEM_TYPES } from './plan.js';
@@ -80,10 +79,10 @@ export function greetingByHour(hour) {
 /** Живая помощь, Казахстан */
 export const HELP = {
   main: {
-    label: 'Контакт-центр 111',
-    number: '111',
-    tel: 'tel:111',
-    note: 'Круглосуточно и бесплатно. Психолог поможет, если тяжело, тревожно или одиноко.',
+    label: 'Call-центр психологической помощи',
+    number: '+7 (705) 483-41-07',
+    tel: 'tel:+77054834107',
+    note: 'Бесплатно. Можно позвонить, если тяжело, тревожно или одиноко.',
     starter: 'Можно начать с простого: «Мне сейчас тяжело, можно я просто поговорю?»',
   },
   youth: {

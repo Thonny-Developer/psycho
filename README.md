@@ -116,11 +116,11 @@ tests/                   тесты на node:test
 
 ## Живая помощь (Казахстан)
 
-- **111** — контакт-центр, круглосуточно и бесплатно, есть психолог для людей в стрессе.
+- **+7 (705) 483-41-07** — бесплатный call-центр психологической помощи.
 - **150** — телефон доверия для детей и молодёжи, анонимно. Сейчас работает Пн–Пт с 9:00 до 18:00, есть WhatsApp +7 708 106 08 10 и чат на telefon150.kz.
 - **112** — экстренные службы.
 
-Номера проверены по [tengrinews.kz](https://tengrinews.kz/kazakhstan_news/zvonit-kazahstantsam-nujna-psihologicheskaya-pomosch-525732/) и [informburo.kz](https://informburo.kz/interview/kak-kontakt-centr-111-okazyvaet-pomoshh-kazaxstancam). Режим работы линий меняется, поэтому перед защитой стоит перепроверить. Номера лежат в `js/content.js`.
+Линия 150 проверена по [tengrinews.kz](https://tengrinews.kz/kazakhstan_news/zvonit-kazahstantsam-nujna-psihologicheskaya-pomosch-525732/). Режим работы линий меняется, поэтому перед защитой стоит перепроверить. Номера лежат в `js/content.js`.
 
 ## Известные ограничения
 

@@ -22,7 +22,7 @@ export function createHelpDialog({ crisis, onClose, onBreathe }) {
           h('span', { class: 'help-number' }, main.number),
           h('span', { class: 'text-15 muted' }, main.note),
           h('span', { class: 'text-15 muted' }, main.starter),
-          h('a', { class: 'btn', href: main.tel }, icon(IC.phone, 20, { strokeWidth: 1.9 }), `Позвонить на ${main.number}`)),
+          h('a', { class: 'btn', href: main.tel }, icon(IC.phone, 20, { strokeWidth: 1.9 }), 'Позвонить')),
         h('ul', { class: 'help-list' },
           h('li', {},
             h('span', { class: 'help-list__body' },
