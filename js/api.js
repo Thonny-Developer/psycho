@@ -50,6 +50,7 @@ export async function requestSteps({ type, description = '', step = null }) {
     const message = typeof data?.error === 'string' ? data.error : 'Сервис сейчас недоступен';
     if (response.status === 429) throw new PlanApiError('rate_limit', message);
     if (response.status === 400) throw new PlanApiError('bad_request', message);
+    if (response.status === 504) throw new PlanApiError('timeout', message);
     throw new PlanApiError('server', message);
   }
 
