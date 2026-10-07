@@ -56,8 +56,8 @@ function field({ name, label, type = 'text', autocomplete, hint, optional = fals
 
 const COPY = {
   welcome: {
-    title: 'Сохранять прогресс?',
-    lead: 'С аккаунтом планы и серия не потеряются, даже если сменишь телефон. Без него всё останется только на этом устройстве.',
+    title: 'Войди, чтобы начать',
+    lead: 'В аккаунте хранятся планы, серия и прогресс — они не потеряются, даже если сменишь телефон. Это займёт минуту.',
   },
   login: { title: 'Вход', lead: 'Планы и серия подтянутся сами.' },
   signup: { title: 'Новый аккаунт', lead: 'Займёт минуту. Планы и серия будут храниться в аккаунте.' },
@@ -74,7 +74,11 @@ export function createAuth({ state, actions }) {
   let submit = null;
 
   const always = h('p', { class: 'text-14 muted auth-note' },
-    icon(IC.heart, 16, { strokeWidth: 1.9 }), 'Дыхание и «Живая помощь» работают всегда, со входом и без.');
+    icon(IC.heart, 16, { strokeWidth: 1.9 }), 'Дыхание и «Живая помощь» работают и без входа.');
+  const unavailable = state.account.enabled === false
+    ? h('div', { class: 'warn-card text-15', role: 'status' },
+      state.online ? 'Вход сейчас недоступен. Это не ты — попробуй чуть позже.' : 'Чтобы войти, нужен интернет. Пока можно просто подышать.')
+    : null;
 
   function form(kind, children, submitLabel) {
     submit = h('button', { class: 'btn', type: 'submit' }, h('span', { class: 'btn__spinner', 'aria-hidden': 'true' }), h('span', {}, submitLabel));
@@ -98,10 +102,12 @@ export function createAuth({ state, actions }) {
     title.textContent = COPY.welcome.title;
     body = [
       h('p', { class: 'lead' }, COPY.welcome.lead),
+      unavailable,
       h('div', { class: 'stack', style: { gap: '8px' } },
         h('button', { class: 'btn', type: 'button', onClick: () => actions.setAuthMode('signup') }, 'Создать аккаунт'),
-        h('button', { class: 'btn btn--soft btn--wide', type: 'button', onClick: () => actions.setAuthMode('login') }, 'Войти'),
-        h('button', { class: 'btn btn--text', type: 'button', onClick: actions.continueAsGuest }, 'Продолжить без аккаунта')),
+        h('button', { class: 'btn btn--soft btn--wide', type: 'button', onClick: () => actions.setAuthMode('login') }, 'Войти')),
+      h('button', { class: 'panic-link', type: 'button', onClick: () => actions.startCalm(null) },
+        icon(IC.wind, 20, { strokeWidth: 1.8 }), 'Мне плохо прямо сейчас — подышать без входа'),
       always,
     ];
   } else if (mode === 'sent') {

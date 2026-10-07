@@ -74,14 +74,7 @@ function statsGrid(stats, streak, actions) {
 
 function accountCard(state, actions) {
   const { account } = state;
-  if (account.enabled !== true && !account.user) return null;
-
-  if (!account.user) {
-    return h('div', { class: 'account-card' },
-      h('p', { class: 'text-15 muted' }, 'Сейчас планы хранятся только на этом устройстве. С аккаунтом они не потеряются, даже если сменишь телефон.'),
-      h('button', { class: 'btn btn--md', type: 'button', dataset: { focus: 'acc-signup' }, onClick: () => actions.openAuth('signup') }, 'Создать аккаунт'),
-      h('button', { class: 'link', type: 'button', style: { alignSelf: 'center' }, dataset: { focus: 'acc-login' }, onClick: () => actions.openAuth('login') }, 'Уже есть аккаунт? Войти'));
-  }
+  if (!account.user) return null;
 
   let syncText;
   let syncIcon = IC.cloud;
@@ -228,13 +221,9 @@ export function createProfile({ actions }) {
           h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.download, 18, { strokeWidth: 1.9 })),
           h('span', {}, state.exporting ? 'Собираю файл…' : 'Скачать мои данные')),
           h('div', { class: 'list-card__sep' }),
-          signedIn
-            ? h('button', { class: 'list-card__btn list-card__btn--warn', type: 'button', dataset: { focus: 'delete-account' }, onClick: actions.askDeleteAccount },
-              h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.trash, 18, { strokeWidth: 1.9 })),
-              h('span', {}, 'Удалить аккаунт'))
-            : h('button', { class: 'list-card__btn list-card__btn--warn', type: 'button', dataset: { focus: 'clear' }, onClick: actions.askClear },
-              h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.trash, 18, { strokeWidth: 1.9 })),
-              h('span', {}, 'Удалить все данные'))),
+          h('button', { class: 'list-card__btn list-card__btn--warn', type: 'button', dataset: { focus: 'delete-account' }, onClick: actions.askDeleteAccount },
+            h('span', { class: 'round-icon', 'aria-hidden': 'true' }, icon(IC.trash, 18, { strokeWidth: 1.9 })),
+            h('span', {}, 'Удалить аккаунт'))),
         h('div', { class: 'card card--sand' },
           h('p', { class: 'serif', style: { fontSize: 'calc(18px * var(--fs))', lineHeight: '1.4' } }, 'Я не психолог и не заменяю помощь специалиста.'),
           h('p', { class: 'text-14 muted' }, 'Паника-режим помогает успокоиться и структурировать задачи. Если тяжело по-настоящему — кнопка «Живая помощь» наверху.'),

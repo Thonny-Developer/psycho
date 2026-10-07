@@ -51,8 +51,7 @@ export function streakWidget(view, actions) {
       h('span', { class: 'stack', style: { minWidth: '0', gap: '2px' } },
         h('span', { class: 'streak-widget__title' }, title),
         h('span', { class: 'text-14 muted' }, text))),
-    weekDots(view),
-    view.guest ? h('span', { class: 'streak-local' }, 'Серия на этом устройстве, не сохранена в аккаунте') : null);
+    weekDots(view));
 }
 
 function calendar(view, month, actions) {
@@ -142,7 +141,6 @@ export function createStreakScreen({ actions }) {
         badgeList(view.best),
         calendar(view, state.streakMonth ?? view.today.slice(0, 7), actions),
         chart(view),
-        view.guest ? h('p', { class: 'streak-local' }, 'Серия считается на этом устройстве и не сохранена в аккаунте. С аккаунтом она переживёт смену телефона.') : null,
       ]);
     },
   };

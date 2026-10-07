@@ -9,7 +9,7 @@ import {
   plural,
 } from './plan.js';
 import { getFallbackSteps, FALLBACK_TITLE } from './fallback.js';
-import { requestReply, requestPlan, requestSplit, describeError, setTokenProvider } from './api.js';
+import { requestReply, requestPlan, requestSplit, describeError, setTokenProvider, setUnauthorizedHandler } from './api.js';
 import { createStorage, userPrefix, DEFAULT_SETTINGS, MAX_SCENARIOS } from './storage.js';
 import {
   loadConfig,
@@ -45,7 +45,6 @@ import { createProfileEdit } from './screens/profile-edit.js';
 import { createAuth } from './screens/auth.js';
 import {
   createHelpDialog,
-  createConfirmSheet,
   createToast,
   createImportSheet,
   createDeleteAccountSheet,
@@ -107,12 +106,9 @@ function baseState() {
     toast: null,
     helpOpen: false,
     helpReason: 'manual',
-    confirmClear: false,
     dataOpen: false,
     online: navigator.onLine !== false,
     accountPromptSeen: false,
-    accountHintSeen: false,
-    showAccountHint: false,
     account: { enabled: null, user: null, profile: null, expired: false, pending: 0, signingOut: false },
     auth: { mode: 'welcome', busy: false, errors: {}, email: '', sentKind: null },
     authReturn: 'home',
@@ -164,6 +160,7 @@ function initialState() {
   }
 
   if (!state.onboarded) state.screen = 'onb';
+  else if (!restoredUser) state.screen = 'auth';
   else if (state.screen === 'onb') state.screen = 'home';
   else if (['plan', 'done'].includes(state.screen) && !state.plan) state.screen = 'home';
   else if (state.screen === 'chat' && !state.messages.length) state.screen = 'home';
@@ -174,7 +171,20 @@ function initialState() {
     state.ai = 'error';
     state.aiErrorText = 'Ответ не успел прийти. Это не ты — попробуем ещё раз.';
   }
-  return state;
+  return gate(state);
+}
+
+// Без аккаунта открыты только знакомство, вход и дыхание; «Живая помощь» — диалог поверх любого экрана.
+// Человеку в кризисе регистрация не должна стоять между ним и телефоном доверия.
+const OPEN_SCREENS = ['onb', 'auth', 'calm'];
+
+function isSignedIn(s = state) {
+  return Boolean(s.account.user && !s.account.expired);
+}
+
+function gate(s) {
+  if (isSignedIn(s) || OPEN_SCREENS.includes(s.screen)) return s;
+  return { ...s, screen: 'auth', auth: { ...baseState().auth, mode: s.account.expired ? 'login' : 'welcome' } };
 }
 
 let state = initialState();
@@ -192,7 +202,6 @@ function persist() {
     onboarded: state.onboarded,
     settings: state.settings,
     accountPromptSeen: state.accountPromptSeen,
-    accountHintSeen: state.accountHintSeen,
     reminderTime: state.reminderTime,
     firstSeenAt: state.firstSeenAt,
   });
@@ -216,7 +225,7 @@ function persist() {
 }
 
 function setState(patch, options) {
-  state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
+  state = gate({ ...state, ...(typeof patch === 'function' ? patch(state) : patch) });
   persist();
   render(options);
 }
@@ -267,9 +276,7 @@ function afterToggle(before, plan) {
       if (state.screen !== 'plan' || state.plan?.id !== plan.id || !getProgress(state.plan).complete) return;
       const saved = storage.addScenario(state.plan);
       if (saved.ok) sync?.setSaved(saved.scenarios.find((p) => p.id === state.plan.id) ?? state.plan, true);
-      // Гостю после первого выполненного плана один раз мягко предлагаем аккаунт
-      const hint = state.account.enabled === true && !state.account.user && !state.accountHintSeen;
-      setState({ screen: 'done', scenarios: saved.scenarios, showAccountHint: hint, accountHintSeen: state.accountHintSeen || hint });
+      setState({ screen: 'done', scenarios: saved.scenarios });
     }, DONE_DELAY);
   } else if (after.done !== before.done) {
     announce(`Сделано ${after.done} из ${after.total}`);
@@ -280,9 +287,7 @@ const actions = {
   nextOnboarding: () => setState({ onb: Math.min(2, state.onb + 1) }),
   skipOnboarding: () => setState({ onb: 2 }),
   finishOnboarding() {
-    // Если аккаунты настроены, один раз спрашиваем, сохранять ли прогресс
-    const ask = state.account.enabled === true && !state.account.user && !state.accountPromptSeen;
-    setState({ onboarded: true, onb: 0, screen: ask ? 'auth' : 'home', auth: { ...baseState().auth, mode: 'welcome' }, authReturn: 'home' });
+    setState({ onboarded: true, onb: 0, screen: isSignedIn() ? 'home' : 'auth', auth: { ...baseState().auth, mode: 'welcome' }, authReturn: 'home' });
   },
   replayOnboarding: () => setState({ screen: 'onb', onb: 0 }),
 
@@ -341,6 +346,10 @@ const actions = {
   nextGround: () => setState({ ground: Math.min(GROUND.length, state.ground + 1) }),
 
   calmDone() {
+    if (!isSignedIn()) {
+      showToast('Чтобы поговорить и собрать план, нужен аккаунт. Дыхание и «Живая помощь» работают и без него.', IC.info);
+      return setState({ screen: 'auth', auth: { ...baseState().auth, mode: 'welcome' } });
+    }
     const messages = state.messages.length ? state.messages : [makeMessage('ai', greetingFor(state.type))];
     setState({ screen: 'chat', messages });
   },
@@ -621,7 +630,6 @@ const actions = {
 
   setSetting: (key, value) => setState({ settings: { ...state.settings, [key]: value } }),
   toggleDataInfo: () => setState({ dataOpen: !state.dataOpen }),
-  askClear: () => setState({ confirmClear: true }),
 
   openHelp: (reason = 'manual') => setState({ helpOpen: true, helpReason: reason }),
 
@@ -629,21 +637,18 @@ const actions = {
 
   openAuth(mode = 'login') {
     listenAuth();
-    setState({ screen: 'auth', auth: { ...baseState().auth, mode }, authReturn: state.screen === 'auth' ? state.authReturn : state.screen, showAccountHint: false });
+    setState({ screen: 'auth', auth: { ...baseState().auth, mode }, authReturn: state.screen === 'auth' ? state.authReturn : state.screen });
   },
 
   setAuthMode(mode, email = state.auth.email) {
     setState({ auth: { ...baseState().auth, mode, email: String(email ?? '').trim() } });
   },
 
+  /** Из входа: у вошедшего — обратно (смена пароля), у остальных — к первому экрану входа. */
   closeAuth() {
-    if (state.auth.mode === 'welcome') return actions.continueAsGuest();
-    setState({ screen: state.authReturn ?? 'home' });
+    if (isSignedIn()) return setState({ screen: state.authReturn ?? 'home' });
+    actions.setAuthMode('welcome');
   },
-
-  continueAsGuest: () => setState({ screen: 'home', accountPromptSeen: true }),
-
-  dismissAccountHint: () => setState({ showAccountHint: false }),
 
   async submitAuth(kind, values) {
     if (state.auth.busy) return;
@@ -977,9 +982,10 @@ async function markImported() {
 function leaveAccount(reason) {
   if (reason === 'expired') {
     if (state.account.expired) return;
-    setState({ account: { ...state.account, expired: true } });
-    showToast('Сессия закончилась. Войди снова — данные на месте', IC.info, 'Войти', () => actions.openAuth('login'));
-    return render();
+    // Данные аккаунта остаются в кеше: после входа тем же аккаунтом всё на месте
+    showToast('Сессия закончилась. Войди снова — данные на месте', IC.info);
+    setState({ account: { ...state.account, expired: true }, screen: 'auth', auth: { ...baseState().auth, mode: 'login', email: state.account.user?.email ?? '' } });
+    return;
   }
 
   sync?.stop();
@@ -989,8 +995,8 @@ function leaveAccount(reason) {
   lastSyncedPlan = guestStorage.loadSession()?.plan ?? null;
   setState({
     ...dataFromStorage(),
-    // Вышли из профиля — там и остаёмся, уже с карточкой гостя
-    screen: state.screen === 'profile' ? 'profile' : 'home',
+    screen: 'auth',
+    auth: { ...baseState().auth, mode: 'welcome' },
     importOffer: null,
     serverPlans: [],
     account: { ...baseState().account, enabled: state.account.enabled },
@@ -999,7 +1005,11 @@ function leaveAccount(reason) {
   render();
 }
 
-setTokenProvider(() => (state.account.user && !state.account.expired ? getAccessToken() : Promise.resolve(null)));
+setTokenProvider(() => (isSignedIn() ? getAccessToken() : Promise.resolve(null)));
+// Сервер не принял токен — сессия закончилась: просим войти, данные остаются на месте
+setUnauthorizedHandler(() => {
+  if (state.account.user) leaveAccount('expired');
+});
 
 async function initAccounts() {
   const config = await loadConfig();
@@ -1013,15 +1023,6 @@ function closeHelp() {
 
 function helpBreathe() {
   setState({ helpOpen: false, screen: 'calm', calmMode: 'breath' });
-}
-
-function clearAll() {
-  guestStorage.clearAll();
-  clearTimeout(doneTimer);
-  clearTimeout(toastTimer);
-  state = { ...baseState(), conversation: state.conversation + 1, account: { ...baseState().account, enabled: state.account.enabled } };
-  render();
-  announce('Все данные удалены');
 }
 
 // ---------- Отрисовка ----------
@@ -1092,7 +1093,8 @@ function renderHeader() {
       : null,
     ['chat', 'plan', 'profile-edit', 'streak', 'book', 'video', 'break'].includes(s) ? button(IC.back, 'Назад', actions.goBack, 'back') : null,
     ['calm', 'done'].includes(s) ? button(IC.close, 'Выйти на главную', actions.goHome, 'close') : null,
-    s === 'auth' ? button(IC.close, state.auth.mode === 'welcome' ? 'Продолжить без аккаунта' : 'Закрыть', actions.closeAuth, 'close') : null,
+    s === 'auth' && isSignedIn() ? button(IC.close, 'Закрыть', actions.closeAuth, 'close') : null,
+    s === 'auth' && !isSignedIn() && state.auth.mode !== 'welcome' ? button(IC.back, 'Назад', actions.closeAuth, 'back') : null,
     h('div', { class: 'header__spacer' }),
     h('button', { class: 'help-btn', type: 'button', dataset: { focus: 'help' }, onClick: () => actions.openHelp('manual') },
       icon(IC.heart, 18, { strokeWidth: 1.9 }), 'Живая помощь'),
@@ -1100,7 +1102,7 @@ function renderHeader() {
 }
 
 function renderTabbar() {
-  const visible = TABS.some((t) => t.screen === state.screen);
+  const visible = isSignedIn() && TABS.some((t) => t.screen === state.screen);
   els.tabbar.hidden = !visible;
   if (!visible) return;
   replaceKeepFocus(els.tabbar, TABS.map((t) => h('button', {
@@ -1166,7 +1168,6 @@ function streakView(plans) {
     doneDays,
     remainingSteps: todayInfo.remainingSteps,
     week: weekView(doneDays, today, streak.restDays),
-    guest: !signedIn && state.account.enabled === true,
   };
 }
 
@@ -1203,8 +1204,7 @@ let returnFocus = null;
 
 function renderLayers() {
   const modalKey = state.helpOpen ? `help-${state.helpReason}`
-    : state.confirmClear ? 'confirm'
-      : state.deleteAccount ? `delete-${state.deleteAccount.busy}-${state.deleteAccount.error ?? ''}`
+    : state.deleteAccount ? `delete-${state.deleteAccount.busy}-${state.deleteAccount.error ?? ''}`
         : state.importOffer ? `import-${state.importOffer.busy}` : '';
   const key = `${modalKey}|${state.toast?.key ?? ''}`;
   if (key === layerKey) return;
@@ -1218,9 +1218,7 @@ function renderLayers() {
     if (modalKey && !hadModal) returnFocus = document.activeElement;
     modal = state.helpOpen
       ? createHelpDialog({ crisis: state.helpReason === 'crisis', onClose: closeHelp, onBreathe: helpBreathe })
-      : state.confirmClear
-        ? createConfirmSheet({ onCancel: () => setState({ confirmClear: false }), onConfirm: clearAll })
-        : state.deleteAccount
+      : state.deleteAccount
           ? createDeleteAccountSheet({ ...state.deleteAccount, onCancel: actions.cancelDeleteAccount, onConfirm: actions.deleteAccount })
           : state.importOffer
             ? createImportSheet({ ...state.importOffer, onImport: actions.acceptImport, onSkip: actions.declineImport })
@@ -1266,7 +1264,6 @@ document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   if (state.deleteAccount && !state.deleteAccount.busy) actions.cancelDeleteAccount();
   else if (state.importOffer && !state.importOffer.busy) actions.declineImport();
-  else if (state.confirmClear) setState({ confirmClear: false });
   else if (state.helpOpen) closeHelp();
 });
 

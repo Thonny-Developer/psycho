@@ -13,7 +13,7 @@ import {
   validateSteps,
 } from '../js/plan.js';
 import { validateMessages, validateReply, keepOneQuestion } from '../js/chat.js';
-import { createRateLimiter, clientIp, getUser } from './_lib/auth.js';
+import { createRateLimiter, getUser, supabaseConfig } from './_lib/auth.js';
 
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
 // mistral-small-latest доступна не на всех тарифах (лимит 0 запросов), поэтому модель настраивается
@@ -120,10 +120,9 @@ const PLAN_TOOL = {
 
 // ---------- Rate limit ----------
 
-// Аккаунт считаем по id пользователя (не обходится сменой сети), гостя — по IP
-const GUEST_LIMIT = 20;
+// AI доступен только с аккаунтом; лимит считается по id пользователя и не обходится сменой сети
 const USER_LIMIT = 30;
-const rateLimit = createRateLimiter({ limit: GUEST_LIMIT });
+const rateLimit = createRateLimiter({ limit: USER_LIMIT });
 
 export { createRateLimiter };
 
@@ -319,8 +318,14 @@ export default async function handler(req, res) {
     return sendError(res, 405, 'Метод не поддерживается');
   }
 
+  if (!supabaseConfig()) {
+    console.error('[plan] Supabase is not configured');
+    return sendError(res, 503, 'Вход сейчас не настроен');
+  }
   const user = await getUser(req);
-  const limit = user ? rateLimit(`user:${user.id}`, Date.now(), USER_LIMIT) : rateLimit(`ip:${clientIp(req)}`);
+  if (!user) return sendError(res, 401, 'Войди снова, чтобы продолжить');
+
+  const limit = rateLimit(`user:${user.id}`);
   if (!limit.ok) {
     res.setHeader('Retry-After', String(limit.retryAfter));
     return sendError(res, 429, 'Слишком много запросов. Подожди минуту');

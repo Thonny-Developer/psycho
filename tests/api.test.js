@@ -7,8 +7,11 @@ const realFetch = globalThis.fetch;
 const realError = console.error;
 let ipCounter = 0;
 
-function call({ method = 'POST', body, ip = `10.0.0.${++ipCounter}` } = {}) {
-  const req = { method, body, headers: { 'x-real-ip': ip } };
+// У каждого вызова свой пользователь, чтобы лимиты тестов не мешали друг другу
+function call({ method = 'POST', body, user = `user-${++ipCounter}`, token = `eyJhbGciOiJIUzI1NiJ9.${user}-token-long.sig` } = {}) {
+  const headers = { 'x-real-ip': '10.0.0.1' };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const req = { method, body, headers };
   const res = {
     statusCode: 200,
     headers: {},
@@ -20,15 +23,25 @@ function call({ method = 'POST', body, ip = `10.0.0.${++ipCounter}` } = {}) {
   return Promise.resolve(handler(req, res)).then(() => res);
 }
 
+/** Supabase Auth подтверждает любой токен вида ….<user>-token-long.sig */
+function authResponse(options) {
+  const match = /\.(.+)-token-long\.sig$/.exec(options.headers.Authorization ?? '');
+  return match ? new Response(JSON.stringify({ id: match[1] }), { status: 200 }) : new Response('{}', { status: 401 });
+}
+
 /** message — то, что Mistral кладёт в choices[0].message */
 function mockMistral(message, status = 200) {
   globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/auth/v1/user')) return authResponse(options);
     mockMistral.lastCall = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({ choices: [{ message }] }), { status });
   };
 }
 
-const text = (content) => ({ content });
+const text = (content) => {
+  mockMistral.lastCall = undefined;
+  return { content };
+};
 const json = (value) => ({ content: JSON.stringify(value) });
 const toolPlan = (args, content = '') => ({
   content,
@@ -37,13 +50,18 @@ const toolPlan = (args, content = '') => ({
 
 beforeEach(() => {
   process.env.MISTRAL_API_KEY = KEY;
+  process.env.SUPABASE_URL = 'https://demo.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'public-anon-key';
   delete process.env.MISTRAL_MODEL;
+  globalThis.fetch = async (url, options) => (String(url).endsWith('/auth/v1/user') ? authResponse(options) : new Response('{}', { status: 500 }));
   console.error = () => {};
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
   console.error = realError;
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_ANON_KEY;
 });
 
 const messages = [{ role: 'ai', text: 'Что случилось?' }, { role: 'user', text: 'Курсовая к пятнице' }];
@@ -145,7 +163,7 @@ test('мусор от модели превращается в короткую 
 });
 
 test('ошибка Mistral не протекает наружу', async () => {
-  globalThis.fetch = async () => new Response(`invalid key ${KEY}`, { status: 401 });
+  globalThis.fetch = async (url, options) => (String(url).endsWith('/auth/v1/user') ? authResponse(options) : new Response(`invalid key ${KEY}`, { status: 401 }));
   const res = await call({ body: { action: 'plan', type: 'bug', messages: [] } });
   assert.equal(res.statusCode, 502);
   assert.ok(!JSON.stringify(res.payload).includes(KEY));
@@ -156,11 +174,19 @@ test('без ключа отвечает 503', async () => {
   assert.equal((await call({ body: { action: 'plan', type: 'exam', messages: [] } })).statusCode, 503);
 });
 
-test('rate limit: 20 запросов в минуту на IP', async () => {
-  const ip = '192.168.1.1';
+test('AI только с аккаунтом: без токена или с чужим — 401, без настроенного Supabase — 503', async () => {
+  mockMistral(text('ок'));
+  assert.equal((await call({ body: { action: 'chat', messages }, token: null })).statusCode, 401);
+  assert.equal((await call({ body: { action: 'chat', messages }, token: 'eyJhbGciOiJIUzI1NiJ9.forged-value-here.xx' })).statusCode, 401);
+  assert.equal(mockMistral.lastCall, undefined, 'до Mistral запрос не дошёл');
+  delete process.env.SUPABASE_URL;
+  assert.equal((await call({ body: { action: 'chat', messages } })).statusCode, 503);
+});
+
+test('rate limit: 30 запросов в минуту на аккаунт, смена IP не помогает', async () => {
   const codes = [];
-  for (let i = 0; i < 21; i++) codes.push((await call({ body: { action: 'nope' }, ip })).statusCode);
-  assert.deepEqual(codes, [...Array(20).fill(400), 429]);
+  for (let i = 0; i < 31; i++) codes.push((await call({ body: { action: 'nope' }, user: 'limited-user' })).statusCode);
+  assert.deepEqual(codes, [...Array(30).fill(400), 429]);
 });
 
 test('createRateLimiter сбрасывает окно', () => {

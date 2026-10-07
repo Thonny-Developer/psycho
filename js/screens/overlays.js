@@ -49,22 +49,6 @@ export function createHelpDialog({ crisis, onClose, onBreathe }) {
           icon(IC.wind, 20), 'Пока ждёшь — подышать со мной'))));
 }
 
-/** Шторка подтверждения «Удалить все данные?». По умолчанию фокус на безопасной кнопке. */
-export function createConfirmSheet({ onCancel, onConfirm }) {
-  const keep = h('button', { class: 'btn', type: 'button', onClick: onCancel }, 'Оставить');
-  return h('div', {
-    class: 'sheet-overlay',
-    onClick: (e) => { if (e.target === e.currentTarget) onCancel(); },
-    ref: (el) => { el.focusTarget = keep; },
-  },
-  h('div', { class: 'sheet', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'clear-title', 'aria-describedby': 'clear-text' },
-    h('h2', { id: 'clear-title' }, 'Удалить все данные?'),
-    h('p', { id: 'clear-text', class: 'text-16 muted' }, 'Сценарии, планы и настройки исчезнут с этого устройства. Вернуть их не получится.'),
-    h('div', { class: 'sheet__actions' },
-      keep,
-      h('button', { class: 'btn btn--outline-warn', type: 'button', onClick: onConfirm }, 'Удалить всё'))));
-}
-
 /** Перенос планов гостя в аккаунт: спрашиваем один раз. */
 export function createImportSheet({ count, busy, onImport, onSkip }) {
   const move = h('button', { class: 'btn', type: 'button', disabled: busy, 'aria-busy': String(busy), onClick: onImport },

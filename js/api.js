@@ -3,16 +3,20 @@ import { toApiMessages, validateReply } from './chat.js';
 
 const ENDPOINT = '/api/plan';
 
-// Токен аккаунта, если человек вошёл: сервер считает лимит запросов по аккаунту, а не по IP
+// AI работает только с аккаунтом: каждый запрос несёт токен, сервер его проверяет
 let tokenProvider = async () => null;
+let onUnauthorized = () => {};
 export function setTokenProvider(fn) {
   tokenProvider = fn;
+}
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn;
 }
 // Чуть больше серверного таймаута к Mistral (15 с), чтобы сервер успел вернуть свою ошибку
 const TIMEOUT_MS = 20_000;
 
 /**
- * kind: offline | timeout | network | rate_limit | bad_request | server | invalid
+ * kind: offline | timeout | network | auth | rate_limit | bad_request | server | invalid
  */
 export class PlanApiError extends Error {
   constructor(kind, message) {
@@ -58,6 +62,10 @@ async function post(payload) {
 
   if (!response.ok) {
     const message = typeof data?.error === 'string' ? data.error : 'Сервис сейчас недоступен';
+    if (response.status === 401) {
+      onUnauthorized();
+      throw new PlanApiError('auth', message);
+    }
     if (response.status === 429) throw new PlanApiError('rate_limit', message);
     if (response.status === 400) throw new PlanApiError('bad_request', message);
     if (response.status === 504) throw new PlanApiError('timeout', message);
@@ -106,6 +114,8 @@ export function describeError(error) {
       return 'AI долго не отвечал.';
     case 'rate_limit':
       return 'Слишком много запросов за минуту, подожди немного.';
+    case 'auth':
+      return 'Сессия закончилась, войди снова.';
     default:
       return 'Связаться с AI не получилось.';
   }

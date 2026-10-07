@@ -2548,13 +2548,6 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-.account-hint {
-  width: 100%;
-  max-width: 420px;
-  padding: 18px;
-  gap: 12px;
-  text-align: center;
-}
 
 /* ===== Аватары ===== */
 
@@ -2713,11 +2706,6 @@ textarea::placeholder {
   height: 64px;
 }
 
-.streak-local {
-  font-size: calc(13px * var(--fs));
-  line-height: 1.4;
-  color: var(--text-2);
-}
 
 .week-dots {
   display: grid;
@@ -3372,4 +3360,24 @@ textarea::placeholder {
   line-height: 1;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+.panic-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 1.5px dashed var(--accent-mute);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: calc(16px * var(--fs));
+  font-weight: 600;
+  text-align: center;
+}
+
+.panic-link:hover {
+  background: var(--accent-soft-2);
 }
