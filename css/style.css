@@ -411,11 +411,16 @@ textarea:focus-visible {
   border-color: var(--border-strong);
 }
 
-.btn--secondary:hover:not(:disabled) {
+.btn--secondary:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--accent);
 }
 
-.btn--secondary:disabled {
+.btn--secondary[aria-disabled="true"] {
+  cursor: default;
+}
+
+.btn--secondary:disabled,
+.btn--secondary[aria-disabled="true"] {
   color: var(--text-muted);
   border-color: var(--border);
 }
